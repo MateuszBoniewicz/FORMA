@@ -1,65 +1,85 @@
-# FORMA — Platforma Szkoleniowo-Analityczna
+# FORMA — Platforma Zarządzania i Monitorowania Rozwoju Zawodników
 
-System wsparcia procesów szkoleniowych dedykowany sztabom trenerskim oraz akademiom piłkarskim. Platforma koncentruje się na długofalowym monitorowaniu rozwoju zawodników (*player-development centered*), błyskawicznej ocenie jednostek treningowych przy linii bocznej oraz analizie samopoczucia i obciążenia (RPE).
-
----
-
-## 🚀 Główne Funkcjonalności
-
-### 1. Panel Szkoleniowy i Tablica Jednostek (`TrainingBoard`)
-* **Dynamiczne zarządzanie jednostkami**: Przegląd zaplanowanych i zakończonych jednostek z podziałem na statusy (*Bieżące / Do oceny / Historia*).
-* **Obsługa Trenerów Multi**: Szybkie przełączanie kontekstu między rocznikami (np. U15, U17, Seniorzy).
-* **Kontrola uprawnień i autorstwa**: Wyraźne rozróżnienie jednostek własnych od jednostek współpracowników ze sztabu; ochrona przed nieautoryzowaną modyfikacją protokołu kolegi (tryb podglądu).
-* **Szybki szkic jednostki**: 3-krokowy kreator tworzenia jednostki zoptymalizowany pod obsługę kciukiem na urządzeniach mobilnych (presety czasowe, akcenty metodyczne, kalkulacja UTC).
-
-### 2. Protokół Szybkiej Oceny Zawodników (`QuickEvaluation`)
-* **Interfejs gestowy (TinderCard)**: Ocena funkcjonowania zawodnika względem własnej normy (`-` / `0` / `+`) za pomocą gestów swipe lub dedykowanego doku przycisków.
-* **Rejestracja absencji i urazów**: Szczegółowe oznaczanie powodów nieobecności (zwolnienia lekarskie, kontuzje z typem urazu) bez negatywnego wpływu na wskaźniki sportowe.
-* **Bezpieczeństwo na boisku (Moduł SOS)**: Szybkie wywołanie kontaktów awaryjnych z bezpośrednim wybieraniem numeru do rodzica/opiekuna (`parent_phone`) dla roczników młodzieżowych.
-
-### 3. Ankiety Potreningowe RPE
-* **Jednorazowe sesje zwrotne**: Aktywacja ankiet ważnych 24h dla zawodników obecnych na treningu.
-* **Natywne udostępnianie (Web Share API)**: Bezpośrednia dystrybucja linku ankiety do aplikacji mobilnych (WhatsApp, Messenger, SMS) lub szybkie kopiowanie do schowka.
-* **Weryfikacja tożsamości**: Autoryzacja odpowiedzi gracza rokiem urodzenia.
-
-### 4. Zarządzanie Mediami i Storage
-* **Integracja z Supabase Storage**: Obsługa dedykowanych bucketów na awatary zawodników (`avatars`) oraz herby klubowe (`club-logos`).
-* **Taktyczny fallback graficzny**: Automatyczne generowanie kafelków z numerem koszulki i inicjałami w przypadku braku zdjęcia.
+**FORMA** to wielozadaniowa, chmurowa platforma klasy SaaS stworzona dla akademii i klubów sportowych. System stawia zawodnika i jego indywidualną ścieżkę rozwoju w centrum uwagi (*player-development centered*), eliminując zbędną biurokrację trenerską na rzecz szybkiej, systematycznej i porównywalnej w czasie oceny postępów po każdym treningu.
 
 ---
 
-## 🛠️ Stos Technologiczny
+## ⚽ Filozofia i Metodyka Oceny
 
-* **Framework**: [Next.js](https://nextjs.org/) (App Router, Server Actions)
-* **Język**: [TypeScript](https://www.typescriptlang.org/)
-* **Baza danych & Backend**: [Supabase](https://supabase.com/) (PostgreSQL, Row Level Security, Supabase Storage, Auth)
-* **Styling**: [Tailwind CSS](https://tailwindcss.com/)
-* **Komponenty UI**: Komponenty customowe stylizowane w estetyce boiska piłkarskiego (*chalk pitch blueprint*)
-* **UI & Komponenty**: [shadcn/ui](https://ui.shadcn.com/) (architektura komponentów bazowych w `components/ui/`)
-* **Ikony**: [Lucide React](https://lucide.dev/)
-* **Narzędzia deweloperskie**: Turbopack, ESLint
+Platforma odchodzi od subiektywnych, bezwzględnych rankingów „najlepszy / najsłabszy” na rzecz monitorowania funkcjonowania zawodnika **w odniesieniu do jego własnego, aktualnego poziomu**:
+
+* **Skala Oceny Względnej (`- / 0 / +`):**
+  * `-` — funkcjonowanie poniżej typowego poziomu zawodnika w danym mikrocyklu;
+  * `0` — funkcjonowanie na swoim typowym, stabilnym poziomie;
+  * `+` — funkcjonowanie powyżej typowego poziomu (wyróżniające zaangażowanie/forma).
+* **Precyzyjna Ewidencja Absencji:** Zawodnik nieobecny nie otrzymuje oceny sportowej; system kategoryzuje powód absencji: *kontuzja*, *choroba*, *usprawiedliwiona*, *nieusprawiedliwiona*.
+* **Samoocena i Ankiety Potreningowe (RPE):** Opcjonalne zbieranie informacji zwrotnej od zawodników lub rodziców (subiektywne zmęczenie 1–10 oraz poziom zadowolenia) za pośrednictwem bezpiecznych, jednorazowych linków tokenowych (bez wymogu logowania konta).
 
 ---
 
-## 📁 Struktura Projektu
+## 🚀 Główne Moduły Systemu
+
+### 1. Panel Administratora Klubu (`/admin`)
+* **Centrum Dowodzenia:** Pasek metryk KPI w czasie rzeczywistym (aktywni zawodnicy, zarejestrowane roczniki, kadra szkoleniowa, aktywny sezon).
+* **Sztab Trenerski (`/admin/sztab`):** Pełny cykl zarządzania szkoleniowcami (CRUD) — automatyczna synchronizacja z Supabase Auth, bezpieczne nadawanie haseł, modyfikacja danych kontaktowych (telefon, e-mail, awatar), blokada logowania oraz usuwanie kont.
+* **Drużyny & Roczniki (`/admin/druzyny`):** Definiowanie kategorii wiekowych (od Skrzata do Seniora), podział struktur klubowych oraz delegowanie I Trenerów i Asystentów.
+* **Kartoteka Zawodników (`/admin/zawodnicy`):**
+  * Inteligentne formularze dostosowane do wieku: dla **juniorów** (<18 lat) wymagane dane opiekuna i opcjonalny kontakt do gracza; dla **seniorów** bezpośredni telefon i e-mail gracza.
+  * Ewidencja dokładnej daty urodzenia (`birth_date`), rocznika i numerów na koszulkach.
+  * Pełna historia przynależności do zespołów (`player_team_history`).
+* **Masowy Importer CSV:** Wbudowany parser obsługujący kodowanie UTF-8, automatyczne wykrywanie separatorów (`,`, `;`), wbudowana instrukcja mapowania kolumn oraz funkcja generowania gotowego szablonu `.csv` do pobrania.
+* **Organizacja i Cykle (`/admin/sezony`):** Konfiguracja sezonów rozgrywkowych, zarządzanie danymi i herbem klubu.
+
+### 2. Panel Trenera (`/trener`)
+* **Dostęp Kontekstowy:** Ścisłe ograniczenie uprawnień szkoleniowca wyłącznie do zespołów, do których został przypisany przez zarząd klubu.
+* **Kreator Treningów:** Planowanie i uruchamianie jednostek treningowych (data, ramy czasowe, cel, kategoria).
+* **Tryb Szybkiej Oceny:** Zoptymalizowany pod kątem urządzeń mobilnych widok zawodnik-po-zawodniku umożliwiający ocenienie całej kadry w mniej niż 60 sekund.
+* **Dyspozytor Ankiet:** Generowanie i wysyłka bezpiecznych tokenów RPE do podopiecznych lub ich rodziców.
+
+### 3. Moduł Analityczny & Audyt
+* **Widok Zagregowany (`v_player_analytics`):** Natywny widok SQL obliczający w locie frekwencję procentową, rozkład formy (`- / 0 / +`), strukturę kontuzji i absencji oraz średnie wskaźniki samopoczucia.
+* **Dziennik Zdarzeń (`audit_logs`):** Niezmienna tabela audytowa rejestrująca modyfikacje ocen, usunięcia profili oraz zmiany administracyjne w strukturach klubu.
+
+---
+
+## 🛠️ Stack Technologiczny
+
+| Warstwa | Technologia | Zastosowanie |
+| :--- | :--- | :--- |
+| **Framework** | **Next.js 16 (App Router)** | Renderowanie hybrydowe (RSC), obsługa Turbopack, routing dynamiczny |
+| **Backend & Logika** | **Server Actions** | Bezpieczne operacje bazodanowe i uwierzytelnianie bez ekspozycji API |
+| **Baza Danych & Auth** | **Supabase (PostgreSQL)** | Relacyjna baza danych, silnik Supabase Auth, Row Level Security (RLS) |
+| **Język Programowania** | **TypeScript** | Ścisłe typowanie end-to-end, stabilność kompilacji produkcyjnej |
+| **Styling & UI** | **Tailwind CSS** | Semantyczny design inspirowany estetyką boiska (*Pitch Art & Mark*), pełna responsywność |
+| **Komponenty & Ikony** | **Lucide React** | Spójny, zoptymalizowany zestaw ikon wektorowych |
+| **Dokumentacja** | **ADR (MADR 3.0.0)** | Sformalizowany rejestr decyzji architektonicznych w katalogu `docs/adr/` |
+
+---
+
+## 📂 Struktura Projektu
 
 ```text
 ├── app/
-│   ├── actions/                 # Server Actions (coach, surveys, auth, analytics)
-│   ├── ankieta/[trainingId]/    # Publiczny moduł wypełniania ankiet RPE
-│   ├── login/                   # Autoryzacja sztabu trenerskiego
-│   ├── trener/                  # Panel trenera
-│   │   ├── [trainingId]/        # Protokół oceny jednostki treningowej
-│   │   ├── layout.tsx           # Globalna powłoka (CoachShell) z tłem boiska
-│   │   └── page.tsx             # Główna tablica jednostek
-│   ├── layout.tsx               # Root layout
-│   └── globals.css              # Style bazowe i motyw graficzny
+│   ├── (auth)/             # Logowanie, reset haseł i obsługa sesji
+│   ├── actions/            # Server Actions (admin.ts, auth.ts, coach.ts)
+│   ├── admin/              # Panel administratora (druzyny, sztab, zawodnicy, sezony)
+│   ├── ankieta/            # Publiczny moduł ankiet potreningowych (dostęp tokenowy)
+│   ├── trener/             # Panel operacyjny szkoleniowca i oceny jednostek
+│   └── layout.tsx          # Główny layout aplikacji
 ├── components/
-│   ├── coach/                   # Komponenty panelu (TrainingBoard, QuickEvaluation, SOS)
-│   ├── ui/                      # Komponenty bazowe (Button, PlayerAvatar)
-│   └── landing/                 # Grafiki i oznaczenia taktyczne (PitchArt, PitchMark)
+│   ├── admin/              # Komponenty panelu zarządczego (navbar, menedżery, CSV)
+│   ├── coach/              # Moduł oceny potreningowej i frekwencji
+│   ├── landing/            # Motywy graficzne PitchArt / PitchMark
+│   └── ui/                 # Uniwersalne prymitywy interfejsu użytkownika
+├── docs/
+│   └── adr/                # Rekordy decyzji architektonicznych (ADR 0001 - 0007)
 ├── lib/
-│   ├── supabase.ts              # Klient Supabase dla przeglądarki
-│   ├── supabase-server.ts       # Klient Supabase z obsługą sesji/ciasteczek
-│   ├── supabase-admin.ts        # Klient z uprawnieniami Service Role
-│   └── utils.ts                 # Funkcje pomocnicze
+│   ├── supabase-admin.ts   # Klient administracyjny (service_role) do zadań Auth
+│   ├── supabase-client.ts  # Klient przeglądarkowy z kontekstem sesji
+│   ├── supabase-server.ts  # Klient serwerowy weryfikujący ciasteczka sesyjne
+│   └── utils.ts            # Narzędzia pomocnicze (formatowanie, Tailwind merge)
+└── public/                 # Zasoby statyczne, herby, ikony PWA
+
+
+📄 Licencja
+Projekt objęty licencją komercyjną zastrzeżoną na rzecz autorów platformy FORMA. Wszelkie prawa zastrzeżone.
