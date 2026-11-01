@@ -99,7 +99,13 @@ function calculateEndTime(startH: number, startM: number, durationMinutes: numbe
 }
 
 export function TrainingBoard() {
-  const { trainings: cachedTrainings, teams: cachedTeams, setTrainingsData } = useCoachStore();
+  const {
+    currentCoachId,
+    trainings: cachedTrainings,
+    teams: cachedTeams,
+    setTrainingsData,
+    invalidateCache,
+  } = useCoachStore();
 
   const trainings = cachedTrainings || [];
   const teams = cachedTeams || [];
@@ -146,7 +152,12 @@ export function TrainingBoard() {
     if (!res.success) {
       setError(res.error || "Nie udało się załadować jednostek.");
     } else {
-      setTrainingsData(res.trainings, res.teams);
+      // Weryfikacja: jeśli w pamięci były dane innego konta trenera, czyścimy je
+      if (currentCoachId && currentCoachId !== res.currentCoachId) {
+        invalidateCache();
+      }
+
+      setTrainingsData(res.currentCoachId, res.trainings, res.teams);
       if (res.teams.length > 0 && !teamId) {
         setTeamId(res.teams[0].id);
       }
@@ -276,6 +287,7 @@ export function TrainingBoard() {
 
   return (
     <div className="mx-auto max-w-2xl pb-16">
+      {/* NAGŁÓWEK TABLICY */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <p className="text-xs font-bold tracking-[0.16em] text-primary uppercase">
@@ -301,6 +313,7 @@ export function TrainingBoard() {
         Po treningu przechodzisz skład nazwisko po nazwisku. Wystawione oceny tworzą historię rozwoju zawodnika.
       </p>
 
+      {/* CZYTELNY PASEK KONTROLNY: ZAKŁADKI I FILTR DRUŻYN */}
       <div className="mt-6 space-y-3 rounded-2xl border-2 border-foreground/20 bg-card p-4 shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/80 pb-3">
           <div className="flex items-center gap-1.5">
@@ -385,8 +398,29 @@ export function TrainingBoard() {
         )}
       </div>
 
+      {/* LISTA KAFELKÓW TRENINGOWYCH ZE SZKIELETEM INLINE (BEZ MRUGANIA) */}
       {loading ? (
-        <p className="mt-8 text-center text-xs font-mono text-muted-foreground">Pobieranie jednostek treningowych…</p>
+        <div className="mt-6 space-y-4 animate-pulse">
+          {[1, 2, 3].map((i) => (
+            <div
+              key={i}
+              className="overflow-hidden rounded-2xl border-2 border-foreground/10 bg-card p-5 space-y-4"
+            >
+              <div className="flex justify-between items-center border-b border-border/60 pb-3">
+                <div className="h-4 w-32 bg-muted rounded" />
+                <div className="h-4 w-24 bg-muted rounded" />
+              </div>
+              <div className="space-y-2">
+                <div className="h-6 w-3/4 bg-muted rounded" />
+                <div className="h-4 w-1/2 bg-muted/60 rounded" />
+              </div>
+              <div className="flex justify-between items-center pt-3 border-t border-border/60">
+                <div className="h-4 w-28 bg-muted rounded" />
+                <div className="h-10 w-28 bg-muted rounded-xl" />
+              </div>
+            </div>
+          ))}
+        </div>
       ) : error ? (
         <div className="mt-6 rounded-xl border-2 border-destructive bg-destructive/10 p-4 text-xs font-mono text-destructive">
           {error}
@@ -412,6 +446,7 @@ export function TrainingBoard() {
                 key={t.id}
                 className="print-card overflow-hidden rounded-2xl border-2 border-foreground/20 bg-card shadow-sm hover:border-foreground/35 transition-all"
               >
+                {/* Pasek nagłówka */}
                 <div className="mow-stripes flex flex-wrap items-center justify-between gap-2 px-4 py-2.5 text-chalk">
                   <div className="flex items-center gap-2">
                     <p className="text-xs font-semibold capitalize tracking-wide">
@@ -430,6 +465,7 @@ export function TrainingBoard() {
                   </p>
                 </div>
 
+                {/* Środek karty */}
                 <div className="p-4 sm:p-5 space-y-3">
                   <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/70 pb-3">
                     <div className="flex items-center gap-2">
@@ -529,6 +565,7 @@ export function TrainingBoard() {
         </ul>
       )}
 
+      {/* KREATOR JEDNOSTKI (WIZARD) */}
       {isWizardOpen && (
         <div
           onTouchStart={handleTouchStart}
@@ -561,6 +598,7 @@ export function TrainingBoard() {
               </div>
             </div>
 
+            {/* Krok 1 */}
             {step === 1 && (
               <div className="my-auto space-y-4 animate-in fade-in slide-in-from-right-4 duration-150">
                 <div>
@@ -684,7 +722,7 @@ export function TrainingBoard() {
                           <select
                             value={currentMonthNum}
                             onChange={(e) => {
-                              const newM = String(e.target.value).padStart(2, "0");
+                              const newM = String(currentMonthNum).padStart(2, "0");
                               const newD = String(currentDayNum).padStart(2, "0");
                               setCustomDate(`${currentYear}-${newM}-${newD}`);
                             }}
@@ -891,6 +929,7 @@ export function TrainingBoard() {
               </div>
             )}
 
+            {/* Krok 2 */}
             {step === 2 && (
               <div className="my-auto space-y-4 animate-in fade-in slide-in-from-right-4 duration-150">
                 <div>
@@ -954,6 +993,7 @@ export function TrainingBoard() {
               </div>
             )}
 
+            {/* Krok 3 */}
             {step === 3 && (
               <div className="my-auto space-y-4 animate-in fade-in slide-in-from-right-4 duration-150">
                 <div className="rounded-xl border-2 border-primary/30 bg-primary/5 p-3.5 text-xs text-muted-foreground">
@@ -998,6 +1038,7 @@ export function TrainingBoard() {
               </div>
             )}
 
+            {/* Dolne przyciski kroków */}
             <div className="border-t pt-3">
               <div className="flex items-center gap-2">
                 {step > 1 ? (

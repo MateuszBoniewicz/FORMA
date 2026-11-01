@@ -148,6 +148,7 @@ export async function getCoachTrainingsAction() {
 
     return {
       success: true,
+      currentCoachId: user.id,
       trainings: formattedTrainings,
       teams: teams.map((t: any) => ({ id: t.id, name: t.name })),
     };

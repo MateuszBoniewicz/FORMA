@@ -2,12 +2,16 @@ import { create } from "zustand";
 import type { DbTrainingCard } from "@/app/actions/coach";
 
 interface CoachState {
+  currentCoachId: string | null;
   trainings: DbTrainingCard[] | null;
   teams: { id: string; name: string }[] | null;
-  // Słownik: klucz to trainingId, wartość to pobrane dane kadry i ocen
   evaluationsCache: Record<string, any>;
 
-  setTrainingsData: (trainings: DbTrainingCard[], teams: { id: string; name: string }[]) => void;
+  setTrainingsData: (
+    coachId: string | null | undefined, // <--- dopuszczamy undefined/null
+    trainings: DbTrainingCard[],
+    teams: { id: string; name: string }[]
+  ) => void;
   cacheEvaluationData: (trainingId: string, data: any) => void;
   updateMarkInCache: (trainingId: string, playerId: string, mark: any) => void;
   resetCachedMarks: (trainingId: string) => void;
@@ -16,12 +20,17 @@ interface CoachState {
 }
 
 export const useCoachStore = create<CoachState>((set) => ({
+  currentCoachId: null,
   trainings: null,
   teams: null,
   evaluationsCache: {},
 
-  setTrainingsData: (trainings, teams) => set({ trainings, teams }),
-
+  setTrainingsData: (coachId, trainings, teams) =>
+    set({
+      currentCoachId: coachId || null,
+      trainings,
+      teams,
+    }),
   cacheEvaluationData: (trainingId, data) =>
     set((state) => ({
       evaluationsCache: {
@@ -108,5 +117,11 @@ export const useCoachStore = create<CoachState>((set) => ({
       };
     }),
 
-  invalidateCache: () => set({ trainings: null, teams: null, evaluationsCache: {} }),
+  invalidateCache: () =>
+    set({
+      currentCoachId: null,
+      trainings: null,
+      teams: null,
+      evaluationsCache: {},
+    }),
 }));

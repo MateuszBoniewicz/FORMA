@@ -4,16 +4,27 @@ import Link from "next/link";
 import { LogOut } from "lucide-react";
 import { PitchArt, PitchMark } from "@/components/landing/mark";
 import { signOutAction } from "@/app/actions/auth";
+import { useCoachStore } from "@/store/useCoachStore";
 
 export function CoachShell({ children }: { children: React.ReactNode }) {
+  const invalidateCache = useCoachStore((state) => state.invalidateCache);
+
+  async function handleSignOut() {
+    // 1. Natychmiastowe wyczyszczenie pamięci Zustand w RAM
+    invalidateCache();
+    // 2. Usunięcie sesji na serwerze Supabase
+    await signOutAction();
+    // 3. Twardy reload — gwarancja zresetowania całego stanu JS w karcie
+    window.location.href = "/login";
+  }
+
   return (
     <div className="relative flex min-h-screen flex-1 flex-col overflow-x-hidden bg-background">
-      
       {/* CHARAKTERYSTYCZNE LINIE BOISKA FORMY W TLE */}
       <PitchArt className="pointer-events-none fixed top-16 -right-[15%] w-[680px] text-foreground/10 select-none opacity-60 block" />
       <PitchArt className="pointer-events-none fixed bottom-0 -left-[20%] w-[600px] text-foreground/10 select-none opacity-40 hidden md:block rotate-180" />
 
-      {/* GÓRNY PASEK NAWIGACYJNY (NAGŁÓWEK Z LOGO I WYLOGOWANIEM) */}
+      {/* GÓRNY PASEK NAWIGACYJNY */}
       <header className="sticky top-0 z-40 border-b-2 border-foreground/15 bg-background/95 backdrop-blur-md">
         <div className="mx-auto flex h-16 max-w-6xl items-center justify-between gap-4 px-4 sm:px-6">
           <Link href="/trener" className="group flex items-center gap-2.5 text-foreground">
@@ -32,7 +43,7 @@ export function CoachShell({ children }: { children: React.ReactNode }) {
             {/* Przycisk bezpiecznego wylogowania ze sztabu */}
             <button
               type="button"
-              onClick={() => signOutAction()}
+              onClick={handleSignOut}
               className="inline-flex items-center gap-1.5 rounded-md border-2 border-foreground/15 px-3 py-1.5 text-xs font-semibold tracking-wider uppercase transition hover:-translate-y-0.5 hover:border-destructive/60 hover:text-destructive hover:shadow-[2px_2px_0_0_var(--foreground)] active:scale-95"
             >
               <LogOut className="size-3.5" />
