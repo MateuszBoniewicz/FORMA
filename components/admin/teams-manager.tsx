@@ -8,8 +8,7 @@ import {
   Trash2, 
   Crown, 
   X, 
-  Shield, 
-  Phone 
+  Shield 
 } from "lucide-react";
 import { 
   createTeamAction, 
@@ -17,6 +16,17 @@ import {
   removeCoachFromTeamAction 
 } from "@/app/actions/admin";
 import { cn } from "@/lib/utils";
+
+export interface AvailableCoach {
+  id: string;
+  fullName?: string;
+  full_name?: string;
+  email: string;
+  phone?: string | null;
+  avatarUrl?: string | null;
+  avatar_url?: string | null;
+  [key: string]: any;
+}
 
 interface CoachAssignment {
   coach_id: string;
@@ -36,13 +46,6 @@ interface TeamItem {
   is_active: boolean;
   created_at: string;
   team_coaches: CoachAssignment[];
-}
-
-interface AvailableCoach {
-  id: string;
-  full_name: string;
-  email: string;
-  phone?: string | null;
 }
 
 const AGE_GROUPS = [
@@ -127,7 +130,12 @@ export function TeamsManager({
         coach_id: selectedCoachId,
         is_primary: isPrimaryCoach,
         profiles: coachProfile
-          ? { full_name: coachProfile.full_name, email: coachProfile.email, phone: coachProfile.phone }
+          ? {
+              full_name: coachProfile.full_name || coachProfile.fullName || "Trener",
+              email: coachProfile.email,
+              phone: coachProfile.phone ?? null,
+              avatar_url: coachProfile.avatar_url || coachProfile.avatarUrl || null,
+            }
           : null,
       };
 
@@ -187,7 +195,7 @@ export function TeamsManager({
           onClick={() => setIsCreateTeamOpen(true)}
           className="inline-flex h-11 items-center gap-2 rounded-xl border-2 border-foreground bg-primary px-4 text-xs font-heading uppercase tracking-wider font-black text-primary-foreground transition active:scale-95 shadow-[3px_3px_0_0_var(--foreground)] shrink-0"
         >
-          <Plus className="size-4 stroke-[3]" />
+          <Plus className="size-4 stroke-3" />
           <span>Utwórz drużynę</span>
         </button>
       </div>
@@ -360,11 +368,14 @@ export function TeamsManager({
                   onChange={(e) => setSelectedCoachId(e.target.value)}
                   className="h-11 w-full rounded-xl border-2 border-foreground/20 bg-background px-3 font-mono text-sm outline-none focus:border-foreground"
                 >
-                  {availableCoaches.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.full_name} ({c.email})
-                    </option>
-                  ))}
+                  {availableCoaches.map((c) => {
+                    const displayName = c.full_name || c.fullName || "Trener";
+                    return (
+                      <option key={c.id} value={c.id}>
+                        {displayName} ({c.email})
+                      </option>
+                    );
+                  })}
                 </select>
               </div>
 
