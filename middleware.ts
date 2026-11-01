@@ -23,10 +23,11 @@ export async function middleware(request: NextRequest) {
 
   const { data: { user } } = await supabase.auth.getUser();
 
-  const isPublicRoute =
-    request.nextUrl.pathname === '/' ||
-    request.nextUrl.pathname.startsWith('/survey') ||
-    request.nextUrl.pathname.startsWith('/login');
+const isPublicRoute =
+  request.nextUrl.pathname === '/' ||
+  request.nextUrl.pathname.startsWith('/survey') ||
+  request.nextUrl.pathname.startsWith('/login') ||
+  request.nextUrl.pathname.startsWith('/koordynator');
 
   // Przekierowanie do logowania w przypadku braku sesji
   if (!user && !isPublicRoute) {
