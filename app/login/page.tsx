@@ -19,19 +19,18 @@ export default function LoginPage() {
 
     const formData = new FormData(event.currentTarget);
 
-  // W app/login/page.tsx:
-startTransition(async () => {
-  const result = await loginAction(formData);
+    startTransition(async () => {
+      const result = await loginAction(formData);
 
-  if (!result.success) {
-    setErrorMsg(result.error || "Nieprawidłowe dane logowania. Sprawdź e-mail i hasło.");
-    return;
-  }
+      if (!result.success) {
+        setErrorMsg(result.error || "Nieprawidłowe dane logowania. Sprawdź e-mail i hasło.");
+        return;
+      }
 
-  // ZMIANA: Przekierowujemy na przygotowany panel trenera:
-  router.push("/trener");
-  router.refresh();
-});
+      // Dynamiczne przekierowanie: Admin trafia do /admin, Trener do /trener
+      router.push(result.redirectTo || "/trener");
+      router.refresh();
+    });
   }
 
   return (
@@ -104,7 +103,7 @@ startTransition(async () => {
                   htmlFor="email"
                   className="block text-xs font-semibold tracking-[0.14em] text-muted-foreground uppercase"
                 >
-                  Adres e-mail trenera
+                  Adres e-mail 
                 </label>
                 <div className="relative mt-2">
                   <input

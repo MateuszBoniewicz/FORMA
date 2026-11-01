@@ -38,7 +38,7 @@ export interface SurveyStatusItem {
 }
 
 /**
- * 1. Pobiera listę jednostek treningowych i zespołów (zoptymalizowane równolegle)
+ * 1. Pobiera listę jednostek treningowych i zespołów przypisanych do zalogowanego trenera
  */
 export async function getCoachTrainingsAction() {
   try {
@@ -49,12 +49,46 @@ export async function getCoachTrainingsAction() {
       return { success: false, error: "Brak aktywnej sesji użytkownika.", trainings: [], teams: [] };
     }
 
-    // Faza 1: Równoległe pobranie zespołów oraz ostatnich jednostek treningowych
-    const [teamsRes, trainingsRes] = await Promise.all([
-      supabase
-        .from("teams")
-        .select("id, name")
-        .order("name"),
+    // Pobranie zespołów, do których trener jest przypisany w tabeli team_coaches
+    const { data: assignments, error: assignErr } = await supabase
+      .from("team_coaches")
+      .select(`
+        team_id,
+        is_primary,
+        teams (
+          id,
+          name,
+          age_group,
+          is_active
+        )
+      `)
+      .eq("coach_id", user.id);
+
+    if (assignErr) {
+      console.error("Błąd zapytania team_coaches:", assignErr.message);
+    }
+
+    const assignedTeams = (assignments || [])
+      .map((item: any) => {
+        const team = Array.isArray(item.teams) ? item.teams[0] : item.teams;
+        return team && team.is_active ? { id: team.id, name: team.name } : null;
+      })
+      .filter((t): t is { id: string; name: string } => t !== null);
+
+    const teamIds = assignedTeams.map((t) => t.id);
+
+    // Jeśli trener nie ma jeszcze przypisanych drużyn, zwracamy pusty stan bez wywoływania błędów
+    if (teamIds.length === 0) {
+      return {
+        success: true,
+        currentCoachId: user.id,
+        trainings: [],
+        teams: [],
+      };
+    }
+
+    // Pobranie treningów tylko dla kadr trenera
+    const [trainingsRes, squadRes] = await Promise.all([
       supabase
         .from("trainings")
         .select(`
@@ -73,37 +107,26 @@ export async function getCoachTrainingsAction() {
           teams ( id, name ),
           lead_coach:profiles!trainings_lead_coach_id_fkey ( full_name )
         `)
+        .in("team_id", teamIds)
         .order("date", { ascending: false })
-        .limit(40), // Zabezpieczenie przed pobieraniem tysięcy rekordów historycznych
+        .limit(40),
+      supabase
+        .from("players")
+        .select("current_team_id")
+        .in("current_team_id", teamIds),
     ]);
 
-    if (teamsRes.error) throw teamsRes.error;
     if (trainingsRes.error) throw trainingsRes.error;
+    if (squadRes.error) throw squadRes.error;
 
-    const teams = teamsRes.data || [];
     const trainings = trainingsRes.data || [];
-
     const trainingIds = trainings.map((t: any) => t.id);
-    const teamIds = teams.map((t: any) => t.id);
 
-    // Faza 2: Równoległe pobranie liczby ocen i liczebności kadr w jednym zapytaniu
-    const [evalsRes, squadRes] = await Promise.all([
-      trainingIds.length > 0
-        ? supabase
-            .from("evaluations")
-            .select("training_id")
-            .in("training_id", trainingIds)
-        : Promise.resolve({ data: [], error: null }),
-      teamIds.length > 0
-        ? supabase
-            .from("players")
-            .select("current_team_id")
-            .in("current_team_id", teamIds)
-        : Promise.resolve({ data: [], error: null }),
-    ]);
+    const evalsRes = trainingIds.length > 0
+      ? await supabase.from("evaluations").select("training_id").in("training_id", trainingIds)
+      : { data: [], error: null };
 
     if (evalsRes.error) throw evalsRes.error;
-    if (squadRes.error) throw squadRes.error;
 
     const evalsByTraining: Record<string, number> = {};
     (evalsRes.data || []).forEach((e: any) => {
@@ -150,9 +173,10 @@ export async function getCoachTrainingsAction() {
       success: true,
       currentCoachId: user.id,
       trainings: formattedTrainings,
-      teams: teams.map((t: any) => ({ id: t.id, name: t.name })),
+      teams: assignedTeams,
     };
   } catch (err: any) {
+    console.error("Błąd getCoachTrainingsAction:", err);
     return { success: false, error: err.message, trainings: [], teams: [] };
   }
 }
@@ -180,6 +204,17 @@ export async function createTrainingAction(payload: {
       return { success: false, error: "Brak aktywnej sesji trenera." };
     }
 
+    const { data: assignment } = await supabase
+      .from("team_coaches")
+      .select("id")
+      .eq("team_id", payload.teamId)
+      .eq("coach_id", user.id)
+      .maybeSingle();
+
+    if (!assignment) {
+      return { success: false, error: "Nie masz uprawnień do planowania jednostek dla tej drużyny." };
+    }
+
     const { data: team, error: teamErr } = await supabase
       .from("teams")
       .select("club_id")
@@ -187,7 +222,7 @@ export async function createTrainingAction(payload: {
       .single();
 
     if (teamErr || !team) {
-      return { success: false, error: "Nie masz uprawnień do dodawania jednostek dla tej drużyny." };
+      return { success: false, error: "Nie znaleziono drużyny." };
     }
 
     const { data, error } = await supabase
@@ -220,7 +255,7 @@ export async function createTrainingAction(payload: {
 }
 
 /**
- * 3. Pobiera dane pojedynczej jednostki, kadrę oraz status ocen (zoptymalizowane równolegle)
+ * 3. Pobiera dane pojedynczej jednostki, kadrę oraz status ocen
  */
 export async function getTrainingEvaluationDataAction(trainingId: string) {
   try {
@@ -253,7 +288,6 @@ export async function getTrainingEvaluationDataAction(trainingId: string) {
       return { success: false, error: "Nie znaleziono jednostki lub brak do niej uprawnień." };
     }
 
-    // Równoległe pobranie profilu trenera, listy zawodników i istniejących ocen
     const [coachProfileRes, playersRes, evalsRes] = await Promise.all([
       training.lead_coach_id
         ? supabaseAdmin
@@ -336,7 +370,7 @@ export async function getTrainingEvaluationDataAction(trainingId: string) {
 }
 
 /**
- * 4. Zapisuje pojedynczą ocenę zawodnika w locie (blokada obcego trenera)
+ * 4. Zapisuje pojedynczą ocenę zawodnika w locie
  */
 export async function savePlayerMarkAction(trainingId: string, playerId: string, mark: Mark) {
   try {
@@ -389,7 +423,7 @@ export async function savePlayerMarkAction(trainingId: string, playerId: string,
 }
 
 /**
- * 5. Resetuje oceny jednostki treningowej (blokada obcego trenera)
+ * 5. Resetuje oceny jednostki treningowej
  */
 export async function resetTrainingEvaluationsAction(trainingId: string) {
   try {
@@ -426,7 +460,7 @@ export async function resetTrainingEvaluationsAction(trainingId: string) {
 }
 
 /**
- * 6. Aktywuje ankietę RPE i zwraca link (dostępne dla sztabu)
+ * 6. Aktywuje ankietę RPE i zwraca link
  */
 export async function enableTrainingSurveyAction(trainingId: string) {
   try {
