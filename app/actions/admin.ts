@@ -294,6 +294,81 @@ export async function deleteCoachAction(coachId: string) {
   }
 }
 
+
+/**
+ * 1. Pomocnik rejestrujący zdarzenie audytowe w bazie
+ */
+export async function logAuditEvent(payload: {
+  clubId: string;
+  userId?: string;
+  action: string;
+  entityType: string;
+  entityId?: string;
+  oldData?: any;
+  newData?: any;
+}) {
+  try {
+    await supabaseAdmin.from("audit_logs").insert({
+      club_id: payload.clubId,
+      user_id: payload.userId || null,
+      action: payload.action,
+      entity_type: payload.entityType,
+      entity_id: payload.entityId || null,
+      old_data: payload.oldData || null,
+      new_data: payload.newData || null,
+      created_at: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.error("Błąd zapisu do audit_logs:", err);
+  }
+}
+
+/**
+ * 2. Pobieranie ostatnich wpisów audytowych dla klubu
+ */
+export async function getClubAuditLogsAction(limit = 100) {
+  try {
+    const { clubId } = await requireAdmin();
+    const supabase = await createClient();
+
+    const { data: logs, error } = await supabase
+      .from("audit_logs")
+      .select(`
+        id,
+        action,
+        entity_type,
+        entity_id,
+        old_data,
+        new_data,
+        created_at,
+        profiles:user_id ( full_name, email )
+      `)
+      .eq("club_id", clubId)
+      .order("created_at", { ascending: false })
+      .limit(limit);
+
+    if (error) throw error;
+
+    const formattedLogs = (logs || []).map((l: any) => ({
+      id: l.id,
+      action: l.action,
+      entityType: l.entity_type,
+      entityId: l.entity_id,
+      oldData: l.old_data,
+      newData: l.new_data,
+      createdAt: l.created_at,
+      authorName: l.profiles?.full_name || "System",
+      authorEmail: l.profiles?.email || null,
+    }));
+
+    return { success: true, logs: formattedLogs };
+  } catch (err: any) {
+    return { success: false, error: err.message, logs: [] };
+  }
+}
+
+
+
 /**
  * Bezpieczne tworzenie trenera w auth.users, profiles i opcjonalnie team_coaches
  */
