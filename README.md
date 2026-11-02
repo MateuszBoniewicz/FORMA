@@ -1,230 +1,85 @@
-# Aplikacja-sportowa.
-Aplikacja sportowa dla trenerów i zawodników
+# FORMA — Platforma Zarządzania i Monitorowania Rozwoju Zawodników
+
+**FORMA** to wielozadaniowa, chmurowa platforma klasy SaaS stworzona dla akademii i klubów sportowych. System stawia zawodnika i jego indywidualną ścieżkę rozwoju w centrum uwagi (*player-development centered*), eliminując zbędną biurokrację trenerską na rzecz szybkiej, systematycznej i porównywalnej w czasie oceny postępów po każdym treningu.
+
+---
+
+## ⚽ Filozofia i Metodyka Oceny
+
+Platforma odchodzi od subiektywnych, bezwzględnych rankingów „najlepszy / najsłabszy” na rzecz monitorowania funkcjonowania zawodnika **w odniesieniu do jego własnego, aktualnego poziomu**:
+
+* **Skala Oceny Względnej (`- / 0 / +`):**
+  * `-` — funkcjonowanie poniżej typowego poziomu zawodnika w danym mikrocyklu;
+  * `0` — funkcjonowanie na swoim typowym, stabilnym poziomie;
+  * `+` — funkcjonowanie powyżej typowego poziomu (wyróżniające zaangażowanie/forma).
+* **Precyzyjna Ewidencja Absencji:** Zawodnik nieobecny nie otrzymuje oceny sportowej; system kategoryzuje powód absencji: *kontuzja*, *choroba*, *usprawiedliwiona*, *nieusprawiedliwiona*.
+* **Samoocena i Ankiety Potreningowe (RPE):** Opcjonalne zbieranie informacji zwrotnej od zawodników lub rodziców (subiektywne zmęczenie 1–10 oraz poziom zadowolenia) za pośrednictwem bezpiecznych, jednorazowych linków tokenowych (bez wymogu logowania konta).
+
+---
+
+## 🚀 Główne Moduły Systemu
+
+### 1. Panel Administratora Klubu (`/admin`)
+* **Centrum Dowodzenia:** Pasek metryk KPI w czasie rzeczywistym (aktywni zawodnicy, zarejestrowane roczniki, kadra szkoleniowa, aktywny sezon).
+* **Sztab Trenerski (`/admin/sztab`):** Pełny cykl zarządzania szkoleniowcami (CRUD) — automatyczna synchronizacja z Supabase Auth, bezpieczne nadawanie haseł, modyfikacja danych kontaktowych (telefon, e-mail, awatar), blokada logowania oraz usuwanie kont.
+* **Drużyny & Roczniki (`/admin/druzyny`):** Definiowanie kategorii wiekowych (od Skrzata do Seniora), podział struktur klubowych oraz delegowanie I Trenerów i Asystentów.
+* **Kartoteka Zawodników (`/admin/zawodnicy`):**
+  * Inteligentne formularze dostosowane do wieku: dla **juniorów** (<18 lat) wymagane dane opiekuna i opcjonalny kontakt do gracza; dla **seniorów** bezpośredni telefon i e-mail gracza.
+  * Ewidencja dokładnej daty urodzenia (`birth_date`), rocznika i numerów na koszulkach.
+  * Pełna historia przynależności do zespołów (`player_team_history`).
+* **Masowy Importer CSV:** Wbudowany parser obsługujący kodowanie UTF-8, automatyczne wykrywanie separatorów (`,`, `;`), wbudowana instrukcja mapowania kolumn oraz funkcja generowania gotowego szablonu `.csv` do pobrania.
+* **Organizacja i Cykle (`/admin/sezony`):** Konfiguracja sezonów rozgrywkowych, zarządzanie danymi i herbem klubu.
+
+### 2. Panel Trenera (`/trener`)
+* **Dostęp Kontekstowy:** Ścisłe ograniczenie uprawnień szkoleniowca wyłącznie do zespołów, do których został przypisany przez zarząd klubu.
+* **Kreator Treningów:** Planowanie i uruchamianie jednostek treningowych (data, ramy czasowe, cel, kategoria).
+* **Tryb Szybkiej Oceny:** Zoptymalizowany pod kątem urządzeń mobilnych widok zawodnik-po-zawodniku umożliwiający ocenienie całej kadry w mniej niż 60 sekund.
+* **Dyspozytor Ankiet:** Generowanie i wysyłka bezpiecznych tokenów RPE do podopiecznych lub ich rodziców.
+
+### 3. Moduł Analityczny & Audyt
+* **Widok Zagregowany (`v_player_analytics`):** Natywny widok SQL obliczający w locie frekwencję procentową, rozkład formy (`- / 0 / +`), strukturę kontuzji i absencji oraz średnie wskaźniki samopoczucia.
+* **Dziennik Zdarzeń (`audit_logs`):** Niezmienna tabela audytowa rejestrująca modyfikacje ocen, usunięcia profili oraz zmiany administracyjne w strukturach klubu.
+
+---
+
+## 🛠️ Stack Technologiczny
+
+| Warstwa | Technologia | Zastosowanie |
+| :--- | :--- | :--- |
+| **Framework** | **Next.js 16 (App Router)** | Renderowanie hybrydowe (RSC), obsługa Turbopack, routing dynamiczny |
+| **Backend & Logika** | **Server Actions** | Bezpieczne operacje bazodanowe i uwierzytelnianie bez ekspozycji API |
+| **Baza Danych & Auth** | **Supabase (PostgreSQL)** | Relacyjna baza danych, silnik Supabase Auth, Row Level Security (RLS) |
+| **Język Programowania** | **TypeScript** | Ścisłe typowanie end-to-end, stabilność kompilacji produkcyjnej |
+| **Styling & UI** | **Tailwind CSS** | Semantyczny design inspirowany estetyką boiska (*Pitch Art & Mark*), pełna responsywność |
+| **Komponenty & Ikony** | **Lucide React** | Spójny, zoptymalizowany zestaw ikon wektorowych |
+| **Dokumentacja** | **ADR (MADR 3.0.0)** | Sformalizowany rejestr decyzji architektonicznych w katalogu `docs/adr/` |
+
+---
+
+## 📂 Struktura Projektu
+
+```text
+├── app/
+│   ├── (auth)/             # Logowanie, reset haseł i obsługa sesji
+│   ├── actions/            # Server Actions (admin.ts, auth.ts, coach.ts)
+│   ├── admin/              # Panel administratora (druzyny, sztab, zawodnicy, sezony)
+│   ├── ankieta/            # Publiczny moduł ankiet potreningowych (dostęp tokenowy)
+│   ├── trener/             # Panel operacyjny szkoleniowca i oceny jednostek
+│   └── layout.tsx          # Główny layout aplikacji
+├── components/
+│   ├── admin/              # Komponenty panelu zarządczego (navbar, menedżery, CSV)
+│   ├── coach/              # Moduł oceny potreningowej i frekwencji
+│   ├── landing/            # Motywy graficzne PitchArt / PitchMark
+│   └── ui/                 # Uniwersalne prymitywy interfejsu użytkownika
+├── docs/
+│   └── adr/                # Rekordy decyzji architektonicznych (ADR 0001 - 0007)
+├── lib/
+│   ├── supabase-admin.ts   # Klient administracyjny (service_role) do zadań Auth
+│   ├── supabase-client.ts  # Klient przeglądarkowy z kontekstem sesji
+│   ├── supabase-server.ts  # Klient serwerowy weryfikujący ciasteczka sesyjne
+│   └── utils.ts            # Narzędzia pomocnicze (formatowanie, Tailwind merge)
+└── public/                 # Zasoby statyczne, herby, ikony PWA
 
 
-// ==========================================
-// 1. TRYB SZYBKIEJ OCENY TRENERA (Mobile)
-// ==========================================
-
-export type EvaluationScore = '-' | '0' | '+';
-export type AbsenceReason = 'unexcused' | 'excused' | 'sick' | 'injury';
-
-export interface PlayerToEvaluate {
-  id: string;
-  firstName: string;
-  lastName: string;
-  avatarUrl?: string;
-  jerseyNumber?: number;
-}
-
-export interface QuickEvaluationProps {
-  trainingId: string;
-  teamName: string;
-  date: string;
-  currentIndex: number;
-  totalPlayers: number;
-  currentPlayer: PlayerToEvaluate;
-  currentValue?: {
-    type: 'score' | 'absence';
-    score?: EvaluationScore;
-    reason?: AbsenceReason;
-  };
-  canGoBack: boolean;
-  onRate: (score: EvaluationScore) => void;
-  onMarkAbsent: (reason: AbsenceReason) => void;
-  onPrevious: () => void;
-  onFinish: () => void;
-}
-
-// ==========================================
-// 2. PUBLICZNA ANKIETA ZAWODNIKA / RODZICA
-// ==========================================
-
-export interface SurveyScreenProps {
-  clubName: string;
-  teamName: string;
-  trainingDate: string;
-  playerName: string;
-  isExpired?: boolean;
-  isSubmitted?: boolean;
-  onSubmit: (data: { fatigue: number; satisfaction: number }) => void; // wartości 1-5
-}
-
-// ==========================================
-// 3. PROFIL ANALITYCZNY ZAWODNIKA
-// ==========================================
-
-export interface PlayerStatSummary {
-  trainingsCount: number;
-  attendanceRate: number; // np. 85 (%)
-  absencesCount: number;
-  scoreDistribution: {
-    minus: { count: number; percentage: number };
-    zero: { count: number; percentage: number };
-    plus: { count: number; percentage: number };
-  };
-  avgFatigue?: number; // 1-5
-  avgSatisfaction?: number; // 1-5
-}
-
-export interface PlayerHistoryEntry {
-  trainingId: string;
-  date: string;
-  status: 'attended' | 'absent';
-  score?: EvaluationScore;
-  absenceReason?: AbsenceReason;
-  fatigue?: number;
-  satisfaction?: number;
-}
-
-export interface PlayerProfileProps {
-  player: PlayerToEvaluate;
-  stats: PlayerStatSummary;
-  history: PlayerHistoryEntry[];
-  selectedPeriod: string;
-  onPeriodChange: (period: string) => void;
-}
-
-// ==========================================
-// 4. DASHBOARD ZESPOŁU / KOORDYNATORA
-// ==========================================
-
-export interface AttentionSignal {
-  playerId: string;
-  playerName: string;
-  avatarUrl?: string;
-  reason: 'negative_streak' | 'high_fatigue' | 'low_satisfaction' | 'attendance_drop';
-  description: string;
-}
-
-export interface TeamDashboardProps {
-  teamName: string;
-  periodLabel: string;
-  stats: {
-    totalTrainings: number;
-    evaluationCompleteness: number; // np. 94 (%)
-    attendanceRate: number; // np. 88 (%)
-    scoreDistribution: {
-      minus: number;
-      zero: number;
-      plus: number;
-    };
-  };
-  attentionList: AttentionSignal[];
-  playersOverview: Array<PlayerToEvaluate & { attendanceRate: number; dominantScore: EvaluationScore }>;
-}
-
-// ==========================================
-// 5. AUTENTYKACJA I SESJA UŻYTKOWNIKA
-// ==========================================
-
-export type UserRole = 'coach' | 'coordinator' | 'club_admin' | 'master_admin';
-
-export interface CurrentUser {
-  id: string;
-  email: string;
-  fullName: string;
-  role: UserRole;
-  clubId: string;
-  clubName: string;
-  avatarUrl?: string;
-  assignedTeamIds?: string[]; // ID zespołów, do których trener ma dostęp
-}
-
-export interface LoginFormProps {
-  onSubmit: (credentials: { email: string; pass: string }) => void;
-  isLoading: boolean;
-  errorMessage?: string;
-}
-
-// ==========================================
-// 6. ZARZĄDZANIE TRENINGAMI (Widok Trenera)
-// ==========================================
-
-export type TrainingStatus = 'scheduled' | 'completed' | 'cancelled';
-export type EvaluationStatus = 'unrated' | 'partial' | 'completed';
-
-export interface TrainingListItem {
-  id: string;
-  teamId: string;
-  teamName: string;
-  date: string;          // np. "2026-03-30"
-  startTime: string;     // np. "17:30"
-  endTime?: string;
-  status: TrainingStatus;
-  evaluationStatus: EvaluationStatus;
-  surveySent: boolean;
-  playersCount: number;
-}
-
-export interface CoachTrainingsViewProps {
-  currentUser: CurrentUser;
-  trainings: TrainingListItem[];
-  availableTeams: Array<{ id: string; name: string }>;
-  onCreateTraining: (data: { teamId: string; date: string; startTime: string; topic?: string }) => void;
-  onStartEvaluation: (trainingId: string) => void;
-  onSendSurvey: (trainingId: string) => void;
-  onCancelTraining: (trainingId: string) => void;
-}
-
-// ==========================================
-// 7. PANEL ADMINISTRATORA KLUBU (CRUD)
-// ==========================================
-
-export interface TeamEntity {
-  id: string;
-  name: string;          // np. "U14"
-  season: string;        // np. "2025/2026"
-  playersCount: number;
-  assignedCoachNames: string[];
-}
-
-export interface PlayerEntity {
-  id: string;
-  firstName: string;
-  lastName: string;
-  birthYear: number;
-  teamId: string;
-  teamName: string;
-  contactEmail?: string; // e-mail do ankiety/rodzica
-  contactPhone?: string;
-  avatarUrl?: string;
-}
-
-export interface CoachEntity {
-  id: string;
-  fullName: string;
-  email: string;
-  assignedTeamIds: string[];
-}
-
-export interface ClubAdminPanelProps {
-  teams: TeamEntity[];
-  players: PlayerEntity[];
-  coaches: CoachEntity[];
-  // Zdarzenia do podpięcia logiki przez backend
-  onCreateTeam: (name: string, season: string) => void;
-  onAddPlayer: (player: Omit<PlayerEntity, 'id' | 'teamName'>) => void;
-  onAssignPlayerToTeam: (playerId: string, newTeamId: string) => void;
-  onInviteCoach: (email: string, fullName: string, teamIds: string[]) => void;
-}
-
-// ==========================================
-// 8. WIDOK MASTER ADMINA (SaaS / Wiele Klubów)
-// ==========================================
-
-export interface ClubItem {
-  id: string;
-  name: string;
-  createdAt: string;
-  adminEmail: string;
-  teamsCount: number;
-  playersCount: number;
-  isActive: boolean;
-}
-
-export interface MasterAdminProps {
-  clubs: ClubItem[];
-  onCreateClub: (clubName: string, initialAdminEmail: string) => void;
-  onToggleClubStatus: (clubId: string, isActive: boolean) => void;
-}
+📄 Licencja
+Projekt objęty licencją komercyjną zastrzeżoną na rzecz autorów platformy FORMA. Wszelkie prawa zastrzeżone.

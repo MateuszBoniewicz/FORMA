@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useCoachStore } from "@/store/useCoachStore";
 import Link from "next/link";
 import {
   ChevronLeft,
@@ -15,6 +16,9 @@ import {
   Share2,
   Check,
   ClipboardCopy,
+  Phone,
+  Search,
+  Lock,
 } from "lucide-react";
 import { Button, buttonVariants } from "@/components/ui/button";
 import {
@@ -36,8 +40,25 @@ import {
 } from "@/app/actions/coach";
 import { cn } from "@/lib/utils";
 
+export type EvaluationPlayer = SquadPlayer & {
+  avatarUrl?: string | null;
+  parentName?: string | null;
+  parentPhone?: string | null;
+  phone?: string | null;
+};
+
 export function QuickEvaluation({ trainingId }: { trainingId: string }) {
-  const [loading, setLoading] = useState(true);
+  const {
+    evaluationsCache,
+    cacheEvaluationData,
+    updateMarkInCache,
+    resetCachedMarks,
+    updateCachedSurveyStatus,
+  } = useCoachStore();
+
+  const cached = evaluationsCache[trainingId];
+
+  const [loading, setLoading] = useState(!cached);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [resetting, setResetting] = useState(false);
   const [training, setTraining] = useState<{
@@ -49,15 +70,31 @@ export function QuickEvaluation({ trainingId }: { trainingId: string }) {
     place: string;
     topic?: string;
     status: string;
-  } | null>(null);
-  const [players, setPlayers] = useState<SquadPlayer[]>([]);
-  const [marks, setMarks] = useState<Record<string, Mark>>({});
+    surveyEnabled?: boolean;
+    isOwner?: boolean;
+    leadCoachName?: string;
+  } | null>(cached?.training || null);
+  const [players, setPlayers] = useState<EvaluationPlayer[]>(cached?.squad || []);
+  const [marks, setMarks] = useState<Record<string, Mark>>(cached?.initialMarks || {});
   const [index, setIndex] = useState(0);
 
   const [absenceModalOpen, setAbsenceModalOpen] = useState(false);
   const [selectedAbsenceReason, setSelectedAbsenceReason] = useState<AbsenceReason | null>(null);
 
+  const [sosModalOpen, setSosModalOpen] = useState(false);
+  const [sosSearch, setSosSearch] = useState("");
+
   useEffect(() => {
+    if (cached) {
+      const firstUnrated = cached.squad.findIndex((p: SquadPlayer) => !cached.initialMarks?.[p.id]);
+      if (firstUnrated !== -1) {
+        setIndex(firstUnrated);
+      } else if (cached.squad.length > 0) {
+        setIndex(cached.squad.length);
+      }
+      return;
+    }
+
     async function init() {
       if (!trainingId) {
         setErrorMsg("Brak identyfikatora jednostki treningowej.");
@@ -73,24 +110,33 @@ export function QuickEvaluation({ trainingId }: { trainingId: string }) {
       if (!res.success) {
         setErrorMsg(res.error || "Nie udało się pobrać jednostki.");
       } else if (res.training && res.squad) {
-        setTraining(res.training);
-        setPlayers(res.squad);
-        setMarks(res.initialMarks || {});
+        const squad = res.squad as EvaluationPlayer[];
+        const initialMarks = res.initialMarks || {};
 
-        const firstUnrated = res.squad.findIndex((p: SquadPlayer) => !res.initialMarks?.[p.id]);
+        setTraining(res.training);
+        setPlayers(squad);
+        setMarks(initialMarks);
+
+        cacheEvaluationData(trainingId, {
+          training: res.training,
+          squad,
+          initialMarks,
+        });
+
+        const firstUnrated = squad.findIndex((p: SquadPlayer) => !initialMarks[p.id]);
         if (firstUnrated !== -1) {
           setIndex(firstUnrated);
-        } else if (res.squad.length > 0) {
-          setIndex(res.squad.length);
+        } else if (squad.length > 0) {
+          setIndex(squad.length);
         }
       }
       setLoading(false);
     }
     init();
-  }, [trainingId]);
+  }, [trainingId, cached, cacheEvaluationData]);
 
   if (loading) {
-    return <p className="text-sm text-muted-foreground">Ładowanie protokołu jednostki…</p>;
+    return <p className="text-sm text-muted-foreground font-mono">Ładowanie protokołu jednostki…</p>;
   }
 
   if (errorMsg || !training) {
@@ -109,18 +155,30 @@ export function QuickEvaluation({ trainingId }: { trainingId: string }) {
   const done = ratedCount(players, marks);
   const player = players[index];
   const finished = index >= total;
+  const isOwner = training.isOwner ?? true;
+
+  const hasAnyParentContacts = players.some((p) => Boolean(p.parentPhone));
 
   async function commit(mark: Mark) {
     if (!player) return;
+    if (!isOwner) {
+      alert("Nie możesz edytować ocen treningu prowadzonego przez innego trenera.");
+      return;
+    }
     setMarks((curr) => ({ ...curr, [player.id]: mark }));
     setAbsenceModalOpen(false);
     setSelectedAbsenceReason(null);
     setIndex((current) => Math.min(current + 1, total));
 
+    updateMarkInCache(trainingId, player.id, mark);
     await savePlayerMarkAction(trainingId, player.id, mark);
   }
 
   async function handleReset() {
+    if (!isOwner) {
+      alert("Nie masz uprawnień do resetowania ocen w tym treningu.");
+      return;
+    }
     if (!window.confirm("Czy na pewno chcesz usunąć wszystkie wystawione oceny dla tego treningu?")) {
       return;
     }
@@ -131,6 +189,7 @@ export function QuickEvaluation({ trainingId }: { trainingId: string }) {
       setIndex(0);
       setAbsenceModalOpen(false);
       setSelectedAbsenceReason(null);
+      resetCachedMarks(trainingId);
     } else {
       alert(res.error || "Wystąpił błąd podczas usuwania ocen.");
     }
@@ -143,20 +202,48 @@ export function QuickEvaluation({ trainingId }: { trainingId: string }) {
     setIndex(next);
   }
 
+  const filteredSosPlayers = players.filter(
+    (p) =>
+      Boolean(p.parentPhone) &&
+      `${p.firstName} ${p.lastName} ${p.jerseyNumber}`.toLowerCase().includes(sosSearch.toLowerCase())
+  );
+
   return (
     <div className="mx-auto max-w-xl pb-8">
-      {/* NAGŁÓWEK POWROTU */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-2">
         <Link href="/trener" className="pitch-link text-xs font-semibold uppercase tracking-wider text-muted-foreground">
           ← Wróć do jednostek
         </Link>
-        <span className="font-mono text-xs font-semibold text-primary">
-          {training.teamName} · {training.startTime}–{training.endTime}
-        </span>
+
+        <div className="flex items-center gap-2">
+          {hasAnyParentContacts && (
+            <button
+              type="button"
+              onClick={() => setSosModalOpen(true)}
+              className="flex items-center gap-1.5 rounded-lg border-2 border-destructive bg-destructive/10 px-2.5 py-1 font-mono text-[11px] font-bold text-destructive uppercase tracking-wide hover:bg-destructive/20 active:scale-95 transition-all shadow-[2px_2px_0_0_var(--foreground)]"
+            >
+              <span className="size-2 rounded-full bg-destructive animate-pulse" />
+              <span>SOS · Rodzice</span>
+            </button>
+          )}
+
+          <span className="font-mono text-xs font-semibold text-primary">
+            {training.teamName} · {training.startTime}–{training.endTime}
+          </span>
+        </div>
       </div>
 
+      {!isOwner && (
+        <div className="mt-2.5 flex items-center justify-between rounded-lg border-2 border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs font-semibold text-amber-900 dark:text-amber-200">
+          <div className="flex items-center gap-2">
+            <Lock className="size-4 shrink-0 text-amber-600" />
+            <span>Tryb podglądu (Prowadzący: {training.leadCoachName || "Inny trener"})</span>
+          </div>
+          <span className="font-mono text-[10px] uppercase opacity-80">Tylko odczyt</span>
+        </div>
+      )}
+
       <div className="print-card mt-3 overflow-hidden rounded-xl border-2 border-foreground/20 bg-card shadow-sm">
-        {/* PASEK POSTĘPU */}
         <div className="mow-stripes flex items-center justify-between gap-3 px-4 py-2.5 text-chalk">
           <p className="text-xs font-medium uppercase tracking-wider">Ocena składu</p>
           <p className="font-mono text-xs font-bold tabular-nums">
@@ -176,12 +263,14 @@ export function QuickEvaluation({ trainingId }: { trainingId: string }) {
             players={players}
             marks={marks}
             resetting={resetting}
+            isOwner={isOwner}
+            initialSurveyEnabled={training.surveyEnabled}
             onEdit={goTo}
             onReset={handleReset}
+            onSurveyActivated={() => updateCachedSurveyStatus(trainingId, true)}
           />
         ) : (
           <div className="p-3 sm:p-5">
-            {/* SUBTELNY PASEK GESTÓW */}
             <div className="mb-3 flex items-center justify-between rounded-lg border border-foreground/10 bg-muted/40 px-3 py-1.5 font-mono text-[11px] font-semibold tracking-tight text-muted-foreground">
               <span className="flex items-center gap-1 text-minus">
                 <ArrowLeft className="size-3" /> Słabiej
@@ -197,30 +286,31 @@ export function QuickEvaluation({ trainingId }: { trainingId: string }) {
               </span>
             </div>
 
-            {/* INTERAKTYWNA KARTA ZE STREFAMI WEKTOROWYMI */}
             <TinderCard
               key={player.id}
               player={player}
               index={index}
               total={total}
               currentMark={marks[player.id]}
+              disabled={!isOwner}
               onSwipeLeft={() => commit({ type: "score", score: "-" })}
               onSwipeRight={() => commit({ type: "score", score: "+" })}
               onSwipeUp={() => commit({ type: "score", score: "0" })}
               onSwipeDown={() => {
+                if (!isOwner) return;
                 setSelectedAbsenceReason(null);
                 setAbsenceModalOpen(true);
               }}
             />
 
-            {/* KOMPAKTOWY DOCK PRZYCISKÓW */}
             <div className="mt-4 flex flex-col items-center gap-2.5">
               <div className="flex w-full items-center justify-center gap-3">
                 <button
                   type="button"
+                  disabled={!isOwner}
                   onClick={() => commit({ type: "score", score: "-" })}
                   aria-label="Ocena: Słabiej (-)"
-                  className="flex h-14 flex-1 items-center justify-center gap-1.5 rounded-xl border-2 border-minus/50 bg-minus/10 font-heading text-xl font-bold text-minus shadow-[2px_2px_0_0_var(--foreground)] transition-transform active:scale-95"
+                  className="flex h-14 flex-1 items-center justify-center gap-1.5 rounded-xl border-2 border-minus/50 bg-minus/10 font-heading text-xl font-bold text-minus shadow-[2px_2px_0_0_var(--foreground)] transition-transform active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <Minus className="size-5 stroke-[3]" />
                   <span>Słabiej</span>
@@ -228,9 +318,10 @@ export function QuickEvaluation({ trainingId }: { trainingId: string }) {
 
                 <button
                   type="button"
+                  disabled={!isOwner}
                   onClick={() => commit({ type: "score", score: "0" })}
                   aria-label="Ocena: Typowo (0)"
-                  className="flex h-14 flex-1 items-center justify-center gap-1.5 rounded-xl border-2 border-zero/60 bg-zero/15 font-heading text-xl font-bold text-foreground shadow-[2px_2px_0_0_var(--foreground)] transition-transform active:scale-95"
+                  className="flex h-14 flex-1 items-center justify-center gap-1.5 rounded-xl border-2 border-zero/60 bg-zero/15 font-heading text-xl font-bold text-foreground shadow-[2px_2px_0_0_var(--foreground)] transition-transform active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <span className="text-2xl leading-none">0</span>
                   <span>Typowo</span>
@@ -238,9 +329,10 @@ export function QuickEvaluation({ trainingId }: { trainingId: string }) {
 
                 <button
                   type="button"
+                  disabled={!isOwner}
                   onClick={() => commit({ type: "score", score: "+" })}
                   aria-label="Ocena: Powyżej (+)"
-                  className="flex h-14 flex-1 items-center justify-center gap-1.5 rounded-xl border-2 border-plus/50 bg-plus/10 font-heading text-xl font-bold text-plus shadow-[2px_2px_0_0_var(--foreground)] transition-transform active:scale-95"
+                  className="flex h-14 flex-1 items-center justify-center gap-1.5 rounded-xl border-2 border-plus/50 bg-plus/10 font-heading text-xl font-bold text-plus shadow-[2px_2px_0_0_var(--foreground)] transition-transform active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <span className="text-2xl leading-none">+</span>
                   <span>Powyżej</span>
@@ -262,12 +354,13 @@ export function QuickEvaluation({ trainingId }: { trainingId: string }) {
 
                 <button
                   type="button"
+                  disabled={!isOwner}
                   onClick={() => {
                     setSelectedAbsenceReason(null);
                     setAbsenceModalOpen(true);
                   }}
                   className={cn(
-                    "flex h-10 flex-1 items-center justify-center gap-2 rounded-lg border-2 text-xs font-semibold transition active:scale-95",
+                    "flex h-10 flex-1 items-center justify-center gap-2 rounded-lg border-2 text-xs font-semibold transition active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed",
                     marks[player.id]?.type === "absence"
                       ? "border-foreground bg-secondary font-bold"
                       : "border-foreground/20 bg-background hover:bg-muted"
@@ -294,7 +387,89 @@ export function QuickEvaluation({ trainingId }: { trainingId: string }) {
         )}
       </div>
 
-      {/* PEŁNOEKRANOWY MODAL WYBORU NIEOBECNOŚCI */}
+      {sosModalOpen && (
+        <div className="fixed inset-0 z-50 flex flex-col justify-between bg-background/98 p-4 backdrop-blur-md sm:p-8 animate-in fade-in duration-200">
+          <div className="mx-auto w-full max-w-lg">
+            <div className="flex items-start justify-between border-b pb-4">
+              <div>
+                <span className="text-xs font-bold tracking-widest text-destructive uppercase">
+                  Procedura awaryjna
+                </span>
+                <h2 className="font-heading text-3xl tracking-tight">Telefony do rodziców</h2>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Natychmiastowe połączenie z opiekunem w razie urazu na boisku.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSosModalOpen(false)}
+                className="rounded-full border-2 border-foreground/20 p-2 hover:bg-muted"
+              >
+                <X className="size-5" />
+              </button>
+            </div>
+
+            <div className="mt-4">
+              <div className="relative flex items-center">
+                <Search className="absolute left-3 size-4 text-muted-foreground" />
+                <input
+                  type="text"
+                  placeholder="Szukaj po nazwisku lub numerze..."
+                  value={sosSearch}
+                  onChange={(e) => setSosSearch(e.target.value)}
+                  className="h-10 w-full rounded-lg border-2 border-foreground/20 bg-card pl-9 pr-3 font-mono text-xs outline-none focus:border-foreground"
+                />
+              </div>
+            </div>
+
+            <div className="mt-4 max-h-[50vh] overflow-y-auto space-y-2 pr-1">
+              {filteredSosPlayers.length === 0 ? (
+                <p className="py-6 text-center font-mono text-xs text-muted-foreground">
+                  Brak numerów do rodziców dla wybranego filtru.
+                </p>
+              ) : (
+                filteredSosPlayers.map((p) => (
+                  <div
+                    key={p.id}
+                    className="flex items-center justify-between gap-3 rounded-lg border-2 border-foreground/20 bg-card p-3 shadow-sm"
+                  >
+                    <div className="min-w-0">
+                      <p className="truncate font-heading text-lg">
+                        <span className="mr-1.5 font-mono text-xs text-primary">#{p.jerseyNumber}</span>
+                        {playerName(p)}
+                      </p>
+                      <p className="text-[11px] text-muted-foreground font-medium truncate">
+                        Opiekun: {p.parentName || "Rodzic / Opiekun"}
+                      </p>
+                    </div>
+
+                    <a
+                      href={`tel:${p.parentPhone}`}
+                      className="flex items-center gap-1.5 rounded-lg border-2 border-emerald-700 bg-emerald-600 px-3 py-1.5 font-mono text-xs font-bold text-white shadow-sm hover:bg-emerald-700 active:scale-95 transition shrink-0"
+                    >
+                      <Phone className="size-3.5" />
+                      <span>{p.parentPhone}</span>
+                    </a>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+
+          <div className="mx-auto w-full max-w-lg border-t pt-3">
+            <Button
+              type="button"
+              variant="outline"
+              size="lg"
+              className="w-full h-11 text-sm font-semibold"
+              onClick={() => setSosModalOpen(false)}
+            >
+              Zamknij kontakty
+            </Button>
+          </div>
+        </div>
+      )}
+
       {absenceModalOpen && player && (
         <div className="fixed inset-0 z-50 flex flex-col justify-between bg-background/98 p-4 backdrop-blur-md sm:p-8 animate-in fade-in duration-200">
           <div className="mx-auto w-full max-w-lg">
@@ -399,23 +574,22 @@ export function QuickEvaluation({ trainingId }: { trainingId: string }) {
   );
 }
 
-/**
- * KARTA Z WEKTOROWĄ DETEKCJĄ KĄTOWĄ I PRIORYTETEM PIONU
- */
 function TinderCard({
   player,
   index,
   total,
   currentMark,
+  disabled,
   onSwipeLeft,
   onSwipeRight,
   onSwipeUp,
   onSwipeDown,
 }: {
-  player: SquadPlayer;
+  player: EvaluationPlayer;
   index: number;
   total: number;
   currentMark?: Mark;
+  disabled?: boolean;
   onSwipeLeft: () => void;
   onSwipeRight: () => void;
   onSwipeUp: () => void;
@@ -429,14 +603,14 @@ function TinderCard({
   const startPos = useRef({ x: 0, y: 0 });
 
   function handlePointerDown(e: React.PointerEvent) {
-    if (flyDirection) return;
+    if (flyDirection || disabled) return;
     setIsDragging(true);
     startPos.current = { x: e.clientX, y: e.clientY };
     (e.target as HTMLElement).setPointerCapture(e.pointerId);
   }
 
   function handlePointerMove(e: React.PointerEvent) {
-    if (!isDragging || flyDirection) return;
+    if (!isDragging || flyDirection || disabled) return;
     const dx = e.clientX - startPos.current.x;
     const dy = e.clientY - startPos.current.y;
     setDrag({ x: dx, y: dy });
@@ -459,7 +633,7 @@ function TinderCard({
   }
 
   function handlePointerUp(e: React.PointerEvent) {
-    if (!isDragging || flyDirection) return;
+    if (!isDragging || flyDirection || disabled) return;
     setIsDragging(false);
 
     const threshold = 70;
@@ -537,10 +711,10 @@ function TinderCard({
         }}
         className={cn(
           "relative flex h-full w-full cursor-grab flex-col justify-between overflow-hidden rounded-2xl border-4 bg-card p-5 shadow-[6px_6px_0_0_var(--foreground)] active:cursor-grabbing sm:p-6",
-          borderGlow
+          borderGlow,
+          disabled && "cursor-default active:cursor-default"
         )}
       >
-        {/* STEMPLE GRAFICZNE */}
         <div
           style={{ opacity: opacityLeft }}
           className="pointer-events-none absolute top-6 right-6 rotate-12 rounded-lg border-4 border-minus bg-background/95 px-4 py-1.5 text-xl font-black tracking-widest text-minus uppercase shadow-md"
@@ -569,22 +743,33 @@ function TinderCard({
           Nieobecność (↓)
         </div>
 
-        {/* GÓRNY PASEK KARTY */}
         <div className="flex items-center justify-between border-b border-border/80 pb-3">
           <span className="rounded-full bg-primary/10 px-2.5 py-1 font-mono text-[11px] font-bold text-primary uppercase">
             Zawodnik {index + 1} / {total}
           </span>
           <span className="font-mono text-[11px] font-medium text-muted-foreground">
-            Przesuń w dowolną stronę
+            {disabled ? "Tryb tylko do odczytu" : "Przesuń w dowolną stronę"}
           </span>
         </div>
 
-        {/* PROFIL ZAWODNIKA */}
         <div className="my-auto flex flex-col items-center text-center">
-          <div className="relative grid size-24 place-items-center rounded-full border-4 border-foreground bg-muted font-heading text-4xl shadow-[3px_3px_0_0_var(--foreground)] sm:size-28">
-            {player.firstName[0]}
-            {player.lastName[0]}
-            <span className="absolute -right-1 -bottom-1 grid size-8 place-items-center rounded-full bg-primary font-mono text-xs font-bold text-primary-foreground shadow-sm">
+          <div className="relative size-24 sm:size-28">
+            <div className="grid size-full place-items-center rounded-full border-4 border-foreground bg-muted font-heading text-4xl shadow-[3px_3px_0_0_var(--foreground)] overflow-hidden">
+              {player.avatarUrl ? (
+                <img
+                  src={player.avatarUrl}
+                  alt={playerName(player)}
+                  className="size-full object-cover"
+                />
+              ) : (
+                <span>
+                  {player.firstName[0]}
+                  {player.lastName[0]}
+                </span>
+              )}
+            </div>
+
+            <span className="absolute -right-1 -bottom-1 grid size-8 place-items-center rounded-full bg-primary font-mono text-xs font-bold text-primary-foreground shadow-sm z-10">
               #{player.jerseyNumber}
             </span>
           </div>
@@ -599,14 +784,13 @@ function TinderCard({
           </div>
         </div>
 
-        {/* DOLNY STATUS */}
         <div className="border-t border-border/80 pt-2.5 text-center text-[11px] text-muted-foreground">
           {currentMark ? (
             <p className="text-foreground">
               Wystawiona ocena: <span className="font-bold underline">{markLabel(currentMark)}</span>
             </p>
           ) : (
-            <p>Brak oceny — przeciągnij lub użyj przycisku</p>
+            <p>{disabled ? "Brak wpisu" : "Brak oceny — przeciągnij lub użyj przycisku"}</p>
           )}
         </div>
       </div>
@@ -614,27 +798,39 @@ function TinderCard({
   );
 }
 
-/**
- * PODSUMOWANIE JEDNOSTKI
- */
 function Summary({
   trainingId,
   players,
   marks,
   resetting,
+  isOwner,
+  initialSurveyEnabled,
   onEdit,
   onReset,
+  onSurveyActivated,
 }: {
   trainingId: string;
-  players: SquadPlayer[];
+  players: EvaluationPlayer[];
   marks: Record<string, Mark>;
   resetting: boolean;
+  isOwner: boolean;
+  initialSurveyEnabled?: boolean;
   onEdit: (index: number) => void;
   onReset: () => void;
+  onSurveyActivated: () => void;
 }) {
   const [surveyLoading, setSurveyLoading] = useState(false);
   const [surveyLink, setSurveyLink] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [canShare, setCanShare] = useState(false);
+
+  useEffect(() => {
+    setCanShare(typeof navigator !== "undefined" && typeof navigator.share === "function");
+
+    if (initialSurveyEnabled) {
+      setSurveyLink(`${window.location.origin}/ankieta/${trainingId}`);
+    }
+  }, [initialSurveyEnabled, trainingId]);
 
   const counts = players.reduce(
     (acc, player) => {
@@ -649,21 +845,53 @@ function Summary({
     { minus: 0, zero: 0, plus: 0, absent: 0, missing: 0 }
   );
 
-  async function handleEnableSurvey() {
+  async function triggerNativeShare(url: string) {
+    if (typeof navigator !== "undefined" && navigator.share) {
+      try {
+        await navigator.share({
+          title: "FORMA — Ankieta potreningowa",
+          text: "Cześć! Prośba o wypełnienie krótkiej ankiety potreningowej RPE (zajmie 30 sekund):",
+          url: url,
+        });
+        return;
+      } catch (err: any) {
+        if (err.name === "AbortError") return;
+      }
+    }
+    await copyToClipboard(url);
+  }
+
+  async function copyToClipboard(url: string) {
+    if (typeof navigator !== "undefined" && navigator.clipboard) {
+      try {
+        await navigator.clipboard.writeText(url);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2500);
+      } catch (err) {
+        console.error("Błąd kopiowania:", err);
+      }
+    }
+  }
+
+  async function handleEnableAndShare() {
     setSurveyLoading(true);
     const res = await enableTrainingSurveyAction(trainingId);
+
     if (res.success && res.surveyUrl) {
       const fullUrl = `${window.location.origin}${res.surveyUrl}`;
       setSurveyLink(fullUrl);
-      if (navigator.clipboard) {
-        await navigator.clipboard.writeText(fullUrl);
-        setCopied(true);
-        setTimeout(() => setCopied(false), 3000);
+      setSurveyLoading(false);
+      onSurveyActivated();
+
+      if (canShare) {
+        await triggerNativeShare(fullUrl);
+      } else {
+        await copyToClipboard(fullUrl);
       }
     } else {
+      setSurveyLoading(false);
       alert(res.error || "Nie udało się aktywować ankiety.");
     }
-    setSurveyLoading(false);
   }
 
   return (
@@ -674,7 +902,6 @@ function Summary({
         Nieobecności i zgłoszone kontuzje zostały wyłączone ze sportowego bilansu formy zespołu.
       </p>
 
-      {/* STATYSTYKI OCEN */}
       <dl className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
         <div className="rounded-lg border-2 border-minus/40 bg-minus/10 p-3">
           <dt className="text-[11px] font-semibold text-minus uppercase">Słabiej (−)</dt>
@@ -694,88 +921,129 @@ function Summary({
         </div>
       </dl>
 
-      {/* ANKIETA POTRENINGOWA RPE */}
-      <div className="mt-5 rounded-xl border-2 border-primary/30 bg-primary/5 p-4">
-        <div>
-          <h3 className="text-xs font-bold uppercase tracking-wider text-primary">Ankieta potreningowa RPE</h3>
-          <p className="mt-0.5 text-xs text-muted-foreground">
-            Udostępnij link zawodnikom, aby ocenili zmęczenie i jakość treningu.
-          </p>
+      <div className="mt-5 rounded-2xl border-2 border-primary/30 bg-primary/5 p-4 sm:p-5">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h3 className="font-heading text-lg uppercase tracking-wide text-primary">
+              Ankieta potreningowa RPE
+            </h3>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              Udostępnij link zawodnikom, aby ocenili zmęczenie i jakość treningu (30 sekund).
+            </p>
+          </div>
+          <span className="rounded-md bg-primary/10 px-2 py-0.5 font-mono text-[10px] font-bold uppercase text-primary shrink-0">
+            24h ważności
+          </span>
         </div>
 
         {surveyLink ? (
-          <div className="mt-3 flex items-center gap-2">
-            <input
-              type="text"
-              readOnly
-              value={surveyLink}
-              className="h-10 flex-1 rounded-lg border-2 border-foreground/20 bg-background px-3 font-mono text-xs outline-none"
-            />
-            <Button
-              type="button"
-              size="sm"
-              onClick={() => {
-                navigator.clipboard.writeText(surveyLink);
-                setCopied(true);
-                setTimeout(() => setCopied(false), 2500);
-              }}
-              className="h-10 gap-1.5 px-3 font-semibold text-xs"
-            >
-              {copied ? <Check className="size-4" /> : <ClipboardCopy className="size-4" />}
-              {copied ? "Skopiowano" : "Kopiuj"}
-            </Button>
+          <div className="mt-4 space-y-3">
+            <div className="flex flex-col sm:flex-row gap-2.5">
+              {canShare && (
+                <button
+                  type="button"
+                  onClick={() => triggerNativeShare(surveyLink)}
+                  className="flex-1 flex items-center justify-center gap-2 h-12 rounded-xl bg-primary text-primary-foreground font-heading text-xs uppercase tracking-wider shadow-[2px_2px_0_0_var(--foreground)] active:scale-95 transition-all"
+                >
+                  <Share2 className="size-4" />
+                  <span>Wyślij (WhatsApp / SMS / Inne)</span>
+                </button>
+              )}
+
+              <button
+                type="button"
+                onClick={() => copyToClipboard(surveyLink)}
+                className={cn(
+                  "flex items-center justify-center gap-2 h-12 px-5 rounded-xl border-2 font-heading text-xs uppercase tracking-wider shadow-[2px_2px_0_0_var(--foreground)] active:scale-95 transition-all",
+                  canShare ? "sm:w-auto" : "w-full",
+                  copied
+                    ? "border-emerald-600 bg-emerald-600 text-white"
+                    : "border-foreground/20 bg-card hover:bg-muted text-foreground"
+                )}
+              >
+                {copied ? <Check className="size-4 stroke-[3]" /> : <ClipboardCopy className="size-4" />}
+                <span>{copied ? "Skopiowano do schowka!" : "Kopiuj link"}</span>
+              </button>
+            </div>
+
+            <div className="flex items-center gap-2 rounded-xl border-2 border-foreground/15 bg-background p-2">
+              <input
+                type="text"
+                readOnly
+                value={surveyLink}
+                onClick={(e) => (e.target as HTMLInputElement).select()}
+                className="flex-1 bg-transparent px-2 font-mono text-xs text-foreground outline-none select-all truncate"
+              />
+            </div>
           </div>
         ) : (
-          <Button
+          <button
             type="button"
-            onClick={handleEnableSurvey}
             disabled={surveyLoading}
-            className="mt-3 h-11 w-full gap-2 text-xs font-bold uppercase shadow-[2px_2px_0_0_var(--foreground)]"
+            onClick={handleEnableAndShare}
+            className="mt-4 flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-primary text-primary-foreground font-heading text-xs uppercase tracking-wider shadow-[3px_3px_0_0_var(--foreground)] active:scale-95 transition-all disabled:opacity-50"
           >
             <Share2 className="size-4" />
-            {surveyLoading ? "Aktywowanie..." : "Udostępnij ankietę zawodnikom"}
-          </Button>
+            <span>{surveyLoading ? "Aktywowanie ankiety..." : "Udostępnij ankietę zawodnikom"}</span>
+          </button>
         )}
       </div>
 
-      {/* LISTA ZAWODNIKÓW */}
       <ul className="mt-4 divide-y divide-border rounded-lg border-2 border-foreground/20 bg-card">
-        {players.map((player, playerIndex) => {
-          const mark = marks[player.id];
+        {players.map((p, playerIndex) => {
+          const mark = marks[p.id];
           const injury = mark?.type === "absence" && mark.reason === "injury" ? mark.injury : undefined;
           return (
-            <li key={player.id} className="flex items-center justify-between gap-3 p-3">
-              <div className="min-w-0">
-                <p className="truncate text-sm font-semibold">
-                  <span className="mr-1.5 font-mono text-muted-foreground">#{player.jerseyNumber}</span>
-                  {playerName(player)}
-                </p>
-                <p className="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
-                  {injury ? <InjuryIcon kind={injury} className="size-3.5 shrink-0 text-destructive" /> : null}
-                  <span>{mark ? markLabel(mark) : "Brak oceny"}</span>
-                </p>
+            <li key={p.id} className="flex items-center justify-between gap-3 p-3">
+              <div className="flex items-center gap-2.5 min-w-0">
+                {p.avatarUrl ? (
+                  <img
+                    src={p.avatarUrl}
+                    alt={playerName(p)}
+                    className="size-8 rounded-full object-cover border border-foreground/20 shrink-0"
+                  />
+                ) : (
+                  <div className="grid size-8 place-items-center rounded-full bg-muted font-heading text-xs shrink-0 border">
+                    {p.firstName[0]}
+                    {p.lastName[0]}
+                  </div>
+                )}
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-semibold">
+                    <span className="mr-1.5 font-mono text-muted-foreground">#{p.jerseyNumber}</span>
+                    {playerName(p)}
+                  </p>
+                  <p className="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
+                    {injury ? <InjuryIcon kind={injury} className="size-3.5 shrink-0 text-destructive" /> : null}
+                    <span>{mark ? markLabel(mark) : "Brak oceny"}</span>
+                  </p>
+                </div>
               </div>
-              <Button type="button" variant="ghost" size="sm" className="h-8 px-2 text-xs" onClick={() => onEdit(playerIndex)}>
-                Popraw
-              </Button>
+
+              {isOwner && (
+                <Button type="button" variant="ghost" size="sm" className="h-8 px-2 text-xs" onClick={() => onEdit(playerIndex)}>
+                  Popraw
+                </Button>
+              )}
             </li>
           );
         })}
       </ul>
 
-      {/* PRZYCISKI KOŃCOWE */}
       <div className="mt-6 flex flex-wrap items-center gap-3">
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          className="h-10 px-4 text-xs text-destructive hover:bg-destructive/10 hover:text-destructive"
-          disabled={resetting}
-          onClick={onReset}
-        >
-          <RotateCcw className={cn("mr-1.5 size-3.5", resetting && "animate-spin")} />
-          {resetting ? "Resetowanie..." : "Wyczyść oceny"}
-        </Button>
+        {isOwner && (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-10 px-4 text-xs text-destructive hover:bg-destructive/10 hover:text-destructive"
+            disabled={resetting}
+            onClick={onReset}
+          >
+            <RotateCcw className={cn("mr-1.5 size-3.5", resetting && "animate-spin")} />
+            {resetting ? "Resetowanie..." : "Wyczyść oceny"}
+          </Button>
+        )}
 
         <Link href="/trener" className={cn(buttonVariants({ size: "default" }), "h-10 flex-1 px-4 font-semibold text-xs")}>
           Wróć do listy jednostek
