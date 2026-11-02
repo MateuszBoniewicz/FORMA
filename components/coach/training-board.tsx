@@ -98,6 +98,30 @@ function calculateEndTime(startH: number, startM: number, durationMinutes: numbe
   return `${endH}:${endM}`;
 }
 
+function canEvaluateTraining(t: DbTrainingCard): boolean {
+  if (t.status === "completed") return true;
+  if (t.status === "cancelled") return false;
+
+  if (t.status === "scheduled" || t.status === "planned") {
+    const now = new Date();
+    const todayStr = now.toISOString().split("T")[0];
+
+    // Data minęła (wczoraj lub dawniej)
+    if (t.date < todayStr) return true;
+
+    // Trening odbywa się dzisiaj – odblokuj, jeśli minęła godzina rozpoczęcia
+    if (t.date === todayStr) {
+      if (!t.startTime) return true;
+      const [h, m] = t.startTime.split(":").map(Number);
+      const trainingMinutes = h * 60 + m;
+      const currentMinutes = now.getHours() * 60 + now.getMinutes();
+      return currentMinutes >= trainingMinutes;
+    }
+  }
+
+  return false;
+}
+
 export function TrainingBoard() {
   const {
     currentCoachId,
@@ -152,7 +176,6 @@ export function TrainingBoard() {
     if (!res.success) {
       setError(res.error || "Nie udało się załadować jednostek.");
     } else {
-      // Weryfikacja: jeśli w pamięci były dane innego konta trenera, czyścimy je
       if (currentCoachId && currentCoachId !== res.currentCoachId) {
         invalidateCache();
       }
@@ -398,7 +421,7 @@ export function TrainingBoard() {
         )}
       </div>
 
-      {/* LISTA KAFELKÓW TRENINGOWYCH ZE SZKIELETEM INLINE (BEZ MRUGANIA) */}
+      {/* LISTA KAFELKÓW TRENINGOWYCH */}
       {loading ? (
         <div className="mt-6 space-y-4 animate-pulse">
           {[1, 2, 3].map((i) => (
@@ -437,9 +460,9 @@ export function TrainingBoard() {
       ) : (
         <ul className="mt-6 space-y-4">
           {filteredTrainings.map((t) => {
+            const canOpen = canEvaluateTraining(t);
             const completed = isFullyEvaluated(t);
-            const inProgress = t.status === "completed" && t.evaluatedCount > 0 && !completed;
-            const canOpen = t.status === "completed";
+            const inProgress = canOpen && t.evaluatedCount > 0 && !completed;
 
             return (
               <li
@@ -556,7 +579,12 @@ export function TrainingBoard() {
                           "Oceń skład →"
                         )}
                       </Link>
-                    ) : null}
+                    ) : (
+                      <span className="inline-flex h-11 items-center gap-1.5 rounded-xl border border-foreground/15 bg-muted/40 px-3.5 font-mono text-[11px] font-semibold text-muted-foreground">
+                        <Clock className="size-3.5 text-muted-foreground" />
+                        <span>Oczekuje na termin</span>
+                      </span>
+                    )}
                   </div>
                 </div>
               </li>

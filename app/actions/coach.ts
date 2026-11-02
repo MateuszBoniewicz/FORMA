@@ -370,7 +370,7 @@ export async function getTrainingEvaluationDataAction(trainingId: string) {
 }
 
 /**
- * 4. Zapisuje pojedynczą ocenę zawodnika w locie
+ * 4. Zapisuje pojedynczą ocenę zawodnika w locie i aktualizuje status jednostki
  */
 export async function savePlayerMarkAction(trainingId: string, playerId: string, mark: Mark) {
   try {
@@ -381,7 +381,7 @@ export async function savePlayerMarkAction(trainingId: string, playerId: string,
 
     const { data: tr } = await supabase
       .from("trainings")
-      .select("club_id, lead_coach_id")
+      .select("club_id, lead_coach_id, status")
       .eq("id", trainingId)
       .single();
 
@@ -416,6 +416,18 @@ export async function savePlayerMarkAction(trainingId: string, playerId: string,
       );
 
     if (error) throw error;
+
+    // Po zapisaniu pierwszej noty automatycznie oznaczamy jednostkę jako zrealizowaną
+    if (tr.status === "scheduled" || tr.status === "planned") {
+      await supabase
+        .from("trainings")
+        .update({
+          status: "completed",
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", trainingId);
+    }
+
     return { success: true };
   } catch (err: any) {
     return { success: false, error: err.message };
