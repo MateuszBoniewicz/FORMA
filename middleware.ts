@@ -34,21 +34,11 @@ export async function middleware(request: NextRequest) {
     return response;
   }
 
-  // Weryfikacja sesji TYLKO dla chronionych tras (/trener, /admin itp.)
+  // Weryfikacja sesji TYLKO dla chronionych tras
   const { data: { user } } = await supabase.auth.getUser();
 
-<<<<<<< HEAD
-const isPublicRoute =
-  request.nextUrl.pathname === '/' ||
-  request.nextUrl.pathname.startsWith('/survey') ||
-  request.nextUrl.pathname.startsWith('/login') ||
-  request.nextUrl.pathname.startsWith('/koordynator');
-
-  // Przekierowanie do logowania w przypadku braku sesji
-  if (!user && !isPublicRoute) {
-=======
+  // Przekierowanie do logowania w przypadku braku sesji na chronionej trasie
   if (!user) {
->>>>>>> upstream/main
     return NextResponse.redirect(new URL('/login', request.url));
   }
 

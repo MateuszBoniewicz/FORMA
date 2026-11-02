@@ -38,9 +38,12 @@ export async function loginAction(formData: FormData) {
     profile = fallbackRes.data;
   }
 
-  // Tylko club_admin trafia do /admin, reszta sztabu do /trener
-  const isClubAdmin = profile?.role === 'club_admin';
-  const redirectTo = isClubAdmin ? '/admin' : '/trener';
+  const redirectTo =
+    profile?.role === 'coordinator'
+      ? '/koordynator'
+      : profile?.role === 'club_admin' || profile?.role === 'master_admin'
+        ? '/admin'
+        : '/trener';
 
   return { success: true, redirectTo };
 }
