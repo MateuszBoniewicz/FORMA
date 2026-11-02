@@ -92,6 +92,7 @@ export function QuickEvaluation({ trainingId }: { trainingId: string }) {
   const [sosSearch, setSosSearch] = useState("");
 
   useEffect(() => {
+    // 1. Jeśli mamy dane w pamięci Zustand, wstępnie ustawiamy wskaźnik zawodnika (natychmiastowy render bez loadera)
     if (cached) {
       const firstUnrated = cached.squad.findIndex((p: SquadPlayer) => !cached.initialMarks?.[p.id]);
       if (firstUnrated !== -1) {
@@ -99,9 +100,10 @@ export function QuickEvaluation({ trainingId }: { trainingId: string }) {
       } else if (cached.squad.length > 0) {
         setIndex(cached.squad.length);
       }
-      return;
     }
 
+    // 2. KLUCZOWA POPRAWKA ZUSTAND: NIE wychodzimy z funkcji!
+    // Zawsze odpytujemy serwer w tle o świeży status 24h i ankiet RPE (wzorzec Stale-While-Revalidate)
     async function init() {
       if (!trainingId) {
         setErrorMsg("Brak identyfikatora jednostki treningowej.");
@@ -109,13 +111,17 @@ export function QuickEvaluation({ trainingId }: { trainingId: string }) {
         return;
       }
 
-      setLoading(true);
+      if (!cached) {
+        setLoading(true);
+      }
       setErrorMsg(null);
 
       const res = await getTrainingEvaluationDataAction(trainingId);
 
       if (!res.success) {
-        setErrorMsg(res.error || "Nie udało się pobrać jednostki.");
+        if (!cached) {
+          setErrorMsg(res.error || "Nie udało się pobrać jednostki.");
+        }
       } else if (res.training && res.squad) {
         const squad = res.squad as EvaluationPlayer[];
         const initialMarks = res.initialMarks || {};
@@ -123,27 +129,30 @@ export function QuickEvaluation({ trainingId }: { trainingId: string }) {
         setTraining(res.training);
         setPlayers(squad);
         setMarks(initialMarks);
-        if (res.surveySummary) {
-          setSurveySummary(res.surveySummary);
-        }
+        setSurveySummary(res.surveySummary || null);
 
+        // Aktualizujemy cache w Zustand o świeże dane
         cacheEvaluationData(trainingId, {
           training: res.training,
           squad,
           initialMarks,
         });
 
-        const firstUnrated = squad.findIndex((p: SquadPlayer) => !initialMarks[p.id]);
-        if (firstUnrated !== -1) {
-          setIndex(firstUnrated);
-        } else if (squad.length > 0) {
-          setIndex(squad.length);
+        // Wskaźnik ustawiamy tylko na pierwszym montowaniu bez cache
+        if (!cached) {
+          const firstUnrated = squad.findIndex((p: SquadPlayer) => !initialMarks[p.id]);
+          if (firstUnrated !== -1) {
+            setIndex(firstUnrated);
+          } else if (squad.length > 0) {
+            setIndex(squad.length);
+          }
         }
       }
       setLoading(false);
     }
+
     init();
-  }, [trainingId, cached, cacheEvaluationData]);
+  }, [trainingId]);
 
   if (loading) {
     return <p className="text-sm text-muted-foreground font-mono">Ładowanie protokołu jednostki…</p>;
@@ -278,7 +287,13 @@ export function QuickEvaluation({ trainingId }: { trainingId: string }) {
             surveySummary={surveySummary}
             onEdit={goTo}
             onReset={handleReset}
-            onSurveyActivated={() => updateCachedSurveyStatus(trainingId, true)}
+            onSurveyActivated={async () => {
+              updateCachedSurveyStatus(trainingId, true);
+              const fresh = await getTrainingEvaluationDataAction(trainingId);
+              if (fresh.success && fresh.surveySummary) {
+                setSurveySummary(fresh.surveySummary);
+              }
+            }}
           />
         ) : (
           <div className="p-3 sm:p-5">
@@ -934,7 +949,7 @@ function Summary({
         </div>
       </dl>
 
-      {/* SEKCJA ANKIET RPE: PODSUMOWANIE GDY WYGASŁA LUB WYSYŁKA GDY JEST AKTYWNA */}
+      {/* SEKCJA ANKIET RPE: PODSUMOWANIE PO 24H LUB WYSYŁKA PODCZAS TRWANIA */}
       {surveySummary && surveySummary.isExpired ? (
         <div className="mt-5 rounded-2xl border-2 border-foreground/20 bg-card p-4 sm:p-5 shadow-[3px_3px_0_0_var(--foreground)] space-y-4 animate-in fade-in duration-200">
           <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/80 pb-3">

@@ -303,6 +303,7 @@ export async function getTrainingEvaluationDataAction(trainingId: string) {
       return { success: false, error: "Nie znaleziono jednostki lub brak do niej uprawnień." };
     }
 
+    // Pobieramy sztab, zawodników, oceny oraz ankiety bezpośrednio z bazy
     const [coachProfileRes, playersRes, evalsRes, surveysRes] = await Promise.all([
       training.lead_coach_id
         ? supabaseAdmin
@@ -320,22 +321,20 @@ export async function getTrainingEvaluationDataAction(trainingId: string) {
         .from("evaluations")
         .select("player_id, score, is_present, absence_reason, comment")
         .eq("training_id", trainingId),
-      training.survey_enabled
-        ? supabaseAdmin
-            .from("post_training_surveys")
-            .select(`
-              id,
-              token,
-              is_completed,
-              fatigue,
-              satisfaction,
-              feedback_note,
-              expires_at,
-              player_id,
-              players!inner ( first_name, last_name, jersey_number )
-            `)
-            .eq("training_id", trainingId)
-        : Promise.resolve({ data: [], error: null }),
+      supabaseAdmin
+        .from("post_training_surveys")
+        .select(`
+          id,
+          token,
+          is_completed,
+          fatigue,
+          satisfaction,
+          feedback_note,
+          expires_at,
+          player_id,
+          players ( first_name, last_name, jersey_number )
+        `)
+        .eq("training_id", trainingId),
     ]);
 
     if (playersRes.error) throw playersRes.error;
@@ -379,12 +378,14 @@ export async function getTrainingEvaluationDataAction(trainingId: string) {
 
     // Przeliczenie podsumowania ankiet RPE
     let surveySummary: SurveySummary | null = null;
-    if (training.survey_enabled && surveysRes.data && surveysRes.data.length > 0) {
-      const rows = surveysRes.data;
-      const firstExpiresAt = rows[0]?.expires_at || null;
-      const isExpired = firstExpiresAt ? new Date(firstExpiresAt) < new Date() : false;
-      const completedList = rows.filter((s: any) => s.is_completed);
-      const totalCount = rows.length;
+    const surveyRows = surveysRes.data || [];
+    const isSurveyEnabled = Boolean(training.survey_enabled) || surveyRows.length > 0;
+
+    if (surveyRows.length > 0) {
+      const firstExpiresAt = surveyRows[0]?.expires_at || null;
+      const isExpired = firstExpiresAt ? new Date(firstExpiresAt).getTime() <= Date.now() : false;
+      const completedList = surveyRows.filter((s: any) => s.is_completed);
+      const totalCount = surveyRows.length;
       const completedCount = completedList.length;
 
       const avgFatigue = completedCount > 0
@@ -431,7 +432,7 @@ export async function getTrainingEvaluationDataAction(trainingId: string) {
         place: training.location || "Boisko główne",
         topic: training.topic || undefined,
         status: training.status,
-        surveyEnabled: Boolean(training.survey_enabled),
+        surveyEnabled: isSurveyEnabled,
         isOwner,
         leadCoachName,
       },
