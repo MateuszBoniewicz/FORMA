@@ -15,6 +15,7 @@ function SurveyContent() {
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState<TrainingSurveyInfo | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [isExpired, setIsExpired] = useState(false);
 
   const [selectedPlayerId, setSelectedPlayerId] = useState<string | null>(null);
   const [birthYear, setBirthYear] = useState("");
@@ -28,9 +29,13 @@ function SurveyContent() {
   const loadData = async () => {
     if (!trainingId) return;
     const res = await getTrainingSurveySession(trainingId);
-    if (!res.success || !res.data) {
-      setErrorMsg(res.error || "Nie udało się załadować jednostki.");
-    } else {
+    if (!res.success) {
+      if (res.isExpired) {
+        setIsExpired(true);
+      } else {
+        setErrorMsg(res.error || "Nie udało się załadować jednostki.");
+      }
+    } else if (res.data) {
       setData(res.data);
     }
     setLoading(false);
@@ -89,7 +94,24 @@ function SurveyContent() {
       <main className="min-h-screen bg-[#F4F1EA] flex items-center justify-center p-4">
         <div className="flex items-center gap-3 bg-white px-5 py-3 rounded-2xl border border-stone-200 shadow-sm">
           <div className="w-5 h-5 border-2 border-[#133E2B] border-t-transparent rounded-full animate-spin" />
-          <span className="text-sm font-bold text-stone-700">Wczytywanie listy szatni...</span>
+          <span className="text-sm font-bold text-stone-700">Ładowanie ankiety...</span>
+        </div>
+      </main>
+    );
+  }
+
+  // WIDOK WYGAŚNIĘCIA ANKIETY (po upływie expires_at)
+  if (isExpired) {
+    return (
+      <main className="min-h-screen bg-[#F4F1EA] flex items-center justify-center p-4 font-sans antialiased">
+        <div className="bg-white border border-stone-200 rounded-3xl p-8 max-w-sm w-full text-center shadow-lg space-y-3">
+          <div className="w-12 h-12 rounded-2xl bg-amber-50 text-amber-600 flex items-center justify-center mx-auto font-black text-xl border border-amber-200">
+            ⏳
+          </div>
+          <h1 className="text-lg font-black text-stone-900 tracking-tight">Ankieta wygasła</h1>
+          <p className="text-xs text-stone-600 leading-relaxed">
+            Czas na przesłanie oceny samopoczucia (RPE) po tej jednostce treningowej upłynął.
+          </p>
         </div>
       </main>
     );
@@ -97,7 +119,7 @@ function SurveyContent() {
 
   if (errorMsg || !data) {
     return (
-      <main className="min-h-screen bg-[#F4F1EA] flex items-center justify-center p-4">
+      <main className="min-h-screen bg-[#F4F1EA] flex items-center justify-center p-4 font-sans antialiased">
         <div className="bg-white border border-stone-200 rounded-3xl p-8 max-w-sm w-full text-center shadow-lg">
           <div className="w-12 h-12 rounded-2xl bg-stone-100 text-stone-600 flex items-center justify-center mx-auto mb-4 font-black">
             !
@@ -143,15 +165,15 @@ function SurveyContent() {
           </div>
         </div>
 
-        {/* KOMUNIKAT POTWIERDZENIA */}
+        {/* KOMUNIKAT POTWIERDZENIA BEZ TEKSTU O TELEFONIE */}
         {submittedName && (
           <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-2xl flex items-center gap-3 animate-in fade-in">
             <div className="w-8 h-8 rounded-xl bg-emerald-600 text-white flex items-center justify-center font-bold text-sm shrink-0">
               ✓
             </div>
             <div>
-              <p className="text-xs font-bold text-emerald-900">Zapisano: {submittedName}</p>
-              <p className="text-[11px] text-emerald-700">Dzięki! Podaj telefon kolejnej osobie z szatni.</p>
+              <p className="text-xs font-bold text-emerald-900">Zapisano ocenę: {submittedName}</p>
+              <p className="text-[11px] text-emerald-700">Twoje odpowiedzi zostały pomyślnie przekazane do sztabu.</p>
             </div>
           </div>
         )}
@@ -163,13 +185,13 @@ function SurveyContent() {
               <div className="w-14 h-14 bg-[#133E2B]/10 text-[#133E2B] rounded-2xl flex items-center justify-center mx-auto font-black text-2xl">
                 ✓
               </div>
-              <h2 className="text-base font-black text-stone-900 tracking-tight">Komplet odpowiedzi szatni</h2>
+              <h2 className="text-base font-black text-stone-900 tracking-tight">Komplet odpowiedzi</h2>
               <p className="text-xs text-stone-500 max-w-xs mx-auto">
                 Wszyscy obecni zawodnicy przesłali swoje parametry zmęczenia. Trener posiada już pełen raport.
               </p>
             </div>
           ) : !selectedPlayerId ? (
-            /* KROK 1: LISTA SZATNI */
+            /* KROK 1: LISTA ZAWODNIKÓW */
             <div className="space-y-3">
               <div className="flex items-center justify-between">
                 <h2 className="text-xs font-black uppercase tracking-wider text-stone-600">
@@ -244,7 +266,7 @@ function SurveyContent() {
                   required
                   className="w-full text-sm font-bold p-3.5 rounded-xl border border-stone-200 bg-[#FAF9F5] focus:bg-white focus:outline-none focus:border-[#133E2B] focus:ring-1 focus:ring-[#133E2B] transition-all"
                 />
-                <p className="text-[10px] text-stone-400 mt-1">Weryfikacja tożsamości szatniowej.</p>
+                <p className="text-[10px] text-stone-400 mt-1">Weryfikacja tożsamości zawodnika.</p>
               </div>
 
               {/* SKALA ZMĘCZENIA */}
