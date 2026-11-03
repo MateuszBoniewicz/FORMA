@@ -19,6 +19,11 @@ import {
   Phone,
   Search,
   Lock,
+  Activity,
+  Smile,
+  Clock,
+  MessageSquare,
+  Users,
 } from "lucide-react";
 import { Button, buttonVariants } from "@/components/ui/button";
 import {
@@ -37,6 +42,7 @@ import {
   savePlayerMarkAction,
   resetTrainingEvaluationsAction,
   enableTrainingSurveyAction,
+  type SurveySummary,
 } from "@/app/actions/coach";
 import { cn } from "@/lib/utils";
 
@@ -76,6 +82,7 @@ export function QuickEvaluation({ trainingId }: { trainingId: string }) {
   } | null>(cached?.training || null);
   const [players, setPlayers] = useState<EvaluationPlayer[]>(cached?.squad || []);
   const [marks, setMarks] = useState<Record<string, Mark>>(cached?.initialMarks || {});
+  const [surveySummary, setSurveySummary] = useState<SurveySummary | null>(null);
   const [index, setIndex] = useState(0);
 
   const [absenceModalOpen, setAbsenceModalOpen] = useState(false);
@@ -85,6 +92,7 @@ export function QuickEvaluation({ trainingId }: { trainingId: string }) {
   const [sosSearch, setSosSearch] = useState("");
 
   useEffect(() => {
+    // 1. Jeśli mamy dane w pamięci Zustand, wstępnie ustawiamy wskaźnik zawodnika (natychmiastowy render bez loadera)
     if (cached) {
       const firstUnrated = cached.squad.findIndex((p: SquadPlayer) => !cached.initialMarks?.[p.id]);
       if (firstUnrated !== -1) {
@@ -92,9 +100,10 @@ export function QuickEvaluation({ trainingId }: { trainingId: string }) {
       } else if (cached.squad.length > 0) {
         setIndex(cached.squad.length);
       }
-      return;
     }
 
+    // 2. KLUCZOWA POPRAWKA ZUSTAND: NIE wychodzimy z funkcji!
+    // Zawsze odpytujemy serwer w tle o świeży status 24h i ankiet RPE (wzorzec Stale-While-Revalidate)
     async function init() {
       if (!trainingId) {
         setErrorMsg("Brak identyfikatora jednostki treningowej.");
@@ -102,13 +111,17 @@ export function QuickEvaluation({ trainingId }: { trainingId: string }) {
         return;
       }
 
-      setLoading(true);
+      if (!cached) {
+        setLoading(true);
+      }
       setErrorMsg(null);
 
       const res = await getTrainingEvaluationDataAction(trainingId);
 
       if (!res.success) {
-        setErrorMsg(res.error || "Nie udało się pobrać jednostki.");
+        if (!cached) {
+          setErrorMsg(res.error || "Nie udało się pobrać jednostki.");
+        }
       } else if (res.training && res.squad) {
         const squad = res.squad as EvaluationPlayer[];
         const initialMarks = res.initialMarks || {};
@@ -116,24 +129,30 @@ export function QuickEvaluation({ trainingId }: { trainingId: string }) {
         setTraining(res.training);
         setPlayers(squad);
         setMarks(initialMarks);
+        setSurveySummary(res.surveySummary || null);
 
+        // Aktualizujemy cache w Zustand o świeże dane
         cacheEvaluationData(trainingId, {
           training: res.training,
           squad,
           initialMarks,
         });
 
-        const firstUnrated = squad.findIndex((p: SquadPlayer) => !initialMarks[p.id]);
-        if (firstUnrated !== -1) {
-          setIndex(firstUnrated);
-        } else if (squad.length > 0) {
-          setIndex(squad.length);
+        // Wskaźnik ustawiamy tylko na pierwszym montowaniu bez cache
+        if (!cached) {
+          const firstUnrated = squad.findIndex((p: SquadPlayer) => !initialMarks[p.id]);
+          if (firstUnrated !== -1) {
+            setIndex(firstUnrated);
+          } else if (squad.length > 0) {
+            setIndex(squad.length);
+          }
         }
       }
       setLoading(false);
     }
+
     init();
-  }, [trainingId, cached, cacheEvaluationData]);
+  }, [trainingId]);
 
   if (loading) {
     return <p className="text-sm text-muted-foreground font-mono">Ładowanie protokołu jednostki…</p>;
@@ -265,9 +284,16 @@ export function QuickEvaluation({ trainingId }: { trainingId: string }) {
             resetting={resetting}
             isOwner={isOwner}
             initialSurveyEnabled={training.surveyEnabled}
+            surveySummary={surveySummary}
             onEdit={goTo}
             onReset={handleReset}
-            onSurveyActivated={() => updateCachedSurveyStatus(trainingId, true)}
+            onSurveyActivated={async () => {
+              updateCachedSurveyStatus(trainingId, true);
+              const fresh = await getTrainingEvaluationDataAction(trainingId);
+              if (fresh.success && fresh.surveySummary) {
+                setSurveySummary(fresh.surveySummary);
+              }
+            }}
           />
         ) : (
           <div className="p-3 sm:p-5">
@@ -805,6 +831,7 @@ function Summary({
   resetting,
   isOwner,
   initialSurveyEnabled,
+  surveySummary,
   onEdit,
   onReset,
   onSurveyActivated,
@@ -815,6 +842,7 @@ function Summary({
   resetting: boolean;
   isOwner: boolean;
   initialSurveyEnabled?: boolean;
+  surveySummary?: SurveySummary | null;
   onEdit: (index: number) => void;
   onReset: () => void;
   onSurveyActivated: () => void;
@@ -921,73 +949,178 @@ function Summary({
         </div>
       </dl>
 
-      <div className="mt-5 rounded-2xl border-2 border-primary/30 bg-primary/5 p-4 sm:p-5">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <h3 className="font-heading text-lg uppercase tracking-wide text-primary">
-              Ankieta potreningowa RPE
-            </h3>
-            <p className="mt-0.5 text-xs text-muted-foreground">
-              Udostępnij link zawodnikom, aby ocenili zmęczenie i jakość treningu (30 sekund).
-            </p>
+      {/* SEKCJA ANKIET RPE: PODSUMOWANIE PO 24H LUB WYSYŁKA PODCZAS TRWANIA */}
+      {surveySummary && surveySummary.isExpired ? (
+        <div className="mt-5 rounded-2xl border-2 border-foreground/20 bg-card p-4 sm:p-5 shadow-[3px_3px_0_0_var(--foreground)] space-y-4 animate-in fade-in duration-200">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/80 pb-3">
+            <div className="flex items-center gap-2">
+              <span className="flex size-7 items-center justify-center rounded-lg bg-primary/10 text-primary border border-primary/20">
+                <Activity className="size-4" />
+              </span>
+              <div>
+                <h3 className="font-heading text-lg uppercase tracking-tight">
+                  Podsumowanie ankiet RPE
+                </h3>
+                <p className="font-mono text-[11px] text-muted-foreground">
+                  Termin 24h minął · Zarchiwizowane wyniki
+                </p>
+              </div>
+            </div>
+            <span className="rounded-md border border-foreground/15 bg-muted/60 px-2 py-0.5 font-mono text-[10px] font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1">
+              <Clock className="size-3" /> Wygasła
+            </span>
           </div>
-          <span className="rounded-md bg-primary/10 px-2 py-0.5 font-mono text-[10px] font-bold uppercase text-primary shrink-0">
-            24h ważności
-          </span>
-        </div>
 
-        {surveyLink ? (
-          <div className="mt-4 space-y-3">
-            <div className="flex flex-col sm:flex-row gap-2.5">
-              {canShare && (
+          <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-3">
+            <div className="rounded-xl border border-foreground/15 bg-background p-3 space-y-1">
+              <span className="text-[10px] font-bold text-muted-foreground uppercase flex items-center gap-1">
+                <Users className="size-3 text-primary" /> Zwrotność
+              </span>
+              <div className="flex items-baseline gap-1.5">
+                <span className="font-heading text-2xl font-bold">
+                  {surveySummary.completedSurveys}
+                </span>
+                <span className="font-mono text-xs text-muted-foreground">
+                  / {surveySummary.totalSurveys} ({surveySummary.responseRate}%)
+                </span>
+              </div>
+              <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
+                <div 
+                  className="h-full bg-primary transition-all duration-500" 
+                  style={{ width: `${surveySummary.responseRate}%` }} 
+                />
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-foreground/15 bg-background p-3 space-y-1">
+              <span className="text-[10px] font-bold text-muted-foreground uppercase flex items-center gap-1">
+                <Activity className="size-3 text-amber-600" /> Śr. Zmęczenie
+              </span>
+              <div className="flex items-baseline gap-1.5">
+                <span className="font-heading text-2xl font-bold text-amber-700 dark:text-amber-400">
+                  {surveySummary.avgFatigue !== null ? surveySummary.avgFatigue : "—"}
+                </span>
+                <span className="font-mono text-xs text-muted-foreground">/ 5.0</span>
+              </div>
+              <p className="font-mono text-[10px] text-muted-foreground">
+                {Number(surveySummary.avgFatigue) >= 4
+                  ? "Wysokie obciążenie"
+                  : Number(surveySummary.avgFatigue) >= 2.5
+                  ? "Optymalny wysiłek"
+                  : "Niski wysiłek / rozruch"}
+              </p>
+            </div>
+
+            <div className="rounded-xl border border-foreground/15 bg-background p-3 space-y-1">
+              <span className="text-[10px] font-bold text-muted-foreground uppercase flex items-center gap-1">
+                <Smile className="size-3 text-emerald-600" /> Śr. Zadowolenie
+              </span>
+              <div className="flex items-baseline gap-1.5">
+                <span className="font-heading text-2xl font-bold text-emerald-700 dark:text-emerald-400">
+                  {surveySummary.avgSatisfaction !== null ? surveySummary.avgSatisfaction : "—"}
+                </span>
+                <span className="font-mono text-xs text-muted-foreground">/ 5.0</span>
+              </div>
+              <p className="font-mono text-[10px] text-muted-foreground">
+                {Number(surveySummary.avgSatisfaction) >= 4
+                  ? "Wysoka satysfakcja"
+                  : "Średni odbiór"}
+              </p>
+            </div>
+          </div>
+
+          {surveySummary.notes && surveySummary.notes.length > 0 && (
+            <div className="space-y-2 pt-1">
+              <span className="font-heading text-xs uppercase tracking-wide text-muted-foreground flex items-center gap-1.5">
+                <MessageSquare className="size-3.5 text-primary" /> Uwagi od zawodników ({surveySummary.notes.length})
+              </span>
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                {surveySummary.notes.map((n, idx) => (
+                  <div key={idx} className="rounded-xl border border-foreground/15 bg-background p-2.5 space-y-1 text-xs">
+                    <div className="flex items-center justify-between">
+                      <span className="font-heading font-bold uppercase">
+                        {n.jerseyNumber ? `#${n.jerseyNumber} ` : ""}{n.playerName}
+                      </span>
+                      <span className="font-mono text-[10px] text-muted-foreground">
+                        Zmęczenie: {n.fatigue}/5
+                      </span>
+                    </div>
+                    <p className="text-foreground/90 italic">„{n.feedbackNote}”</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      ) : (
+        <div className="mt-5 rounded-2xl border-2 border-primary/30 bg-primary/5 p-4 sm:p-5">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h3 className="font-heading text-lg uppercase tracking-wide text-primary">
+                Ankieta potreningowa RPE
+              </h3>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                Udostępnij link zawodnikom, aby ocenili zmęczenie i jakość treningu (30 sekund).
+              </p>
+            </div>
+            <span className="rounded-md bg-primary/10 px-2 py-0.5 font-mono text-[10px] font-bold uppercase text-primary shrink-0">
+              24h ważności
+            </span>
+          </div>
+
+          {surveyLink ? (
+            <div className="mt-4 space-y-3">
+              <div className="flex flex-col sm:flex-row gap-2.5">
+                {canShare && (
+                  <button
+                    type="button"
+                    onClick={() => triggerNativeShare(surveyLink)}
+                    className="flex-1 flex items-center justify-center gap-2 h-12 rounded-xl bg-primary text-primary-foreground font-heading text-xs uppercase tracking-wider shadow-[2px_2px_0_0_var(--foreground)] active:scale-95 transition-all"
+                  >
+                    <Share2 className="size-4" />
+                    <span>Wyślij (WhatsApp / SMS / Inne)</span>
+                  </button>
+                )}
+
                 <button
                   type="button"
-                  onClick={() => triggerNativeShare(surveyLink)}
-                  className="flex-1 flex items-center justify-center gap-2 h-12 rounded-xl bg-primary text-primary-foreground font-heading text-xs uppercase tracking-wider shadow-[2px_2px_0_0_var(--foreground)] active:scale-95 transition-all"
+                  onClick={() => copyToClipboard(surveyLink)}
+                  className={cn(
+                    "flex items-center justify-center gap-2 h-12 px-5 rounded-xl border-2 font-heading text-xs uppercase tracking-wider shadow-[2px_2px_0_0_var(--foreground)] active:scale-95 transition-all",
+                    canShare ? "sm:w-auto" : "w-full",
+                    copied
+                      ? "border-emerald-600 bg-emerald-600 text-white"
+                      : "border-foreground/20 bg-card hover:bg-muted text-foreground"
+                  )}
                 >
-                  <Share2 className="size-4" />
-                  <span>Wyślij (WhatsApp / SMS / Inne)</span>
+                  {copied ? <Check className="size-4 stroke-[3]" /> : <ClipboardCopy className="size-4" />}
+                  <span>{copied ? "Skopiowano do schowka!" : "Kopiuj link"}</span>
                 </button>
-              )}
+              </div>
 
-              <button
-                type="button"
-                onClick={() => copyToClipboard(surveyLink)}
-                className={cn(
-                  "flex items-center justify-center gap-2 h-12 px-5 rounded-xl border-2 font-heading text-xs uppercase tracking-wider shadow-[2px_2px_0_0_var(--foreground)] active:scale-95 transition-all",
-                  canShare ? "sm:w-auto" : "w-full",
-                  copied
-                    ? "border-emerald-600 bg-emerald-600 text-white"
-                    : "border-foreground/20 bg-card hover:bg-muted text-foreground"
-                )}
-              >
-                {copied ? <Check className="size-4 stroke-[3]" /> : <ClipboardCopy className="size-4" />}
-                <span>{copied ? "Skopiowano do schowka!" : "Kopiuj link"}</span>
-              </button>
+              <div className="flex items-center gap-2 rounded-xl border-2 border-foreground/15 bg-background p-2">
+                <input
+                  type="text"
+                  readOnly
+                  value={surveyLink}
+                  onClick={(e) => (e.target as HTMLInputElement).select()}
+                  className="flex-1 bg-transparent px-2 font-mono text-xs text-foreground outline-none select-all truncate"
+                />
+              </div>
             </div>
-
-            <div className="flex items-center gap-2 rounded-xl border-2 border-foreground/15 bg-background p-2">
-              <input
-                type="text"
-                readOnly
-                value={surveyLink}
-                onClick={(e) => (e.target as HTMLInputElement).select()}
-                className="flex-1 bg-transparent px-2 font-mono text-xs text-foreground outline-none select-all truncate"
-              />
-            </div>
-          </div>
-        ) : (
-          <button
-            type="button"
-            disabled={surveyLoading}
-            onClick={handleEnableAndShare}
-            className="mt-4 flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-primary text-primary-foreground font-heading text-xs uppercase tracking-wider shadow-[3px_3px_0_0_var(--foreground)] active:scale-95 transition-all disabled:opacity-50"
-          >
-            <Share2 className="size-4" />
-            <span>{surveyLoading ? "Aktywowanie ankiety..." : "Udostępnij ankietę zawodnikom"}</span>
-          </button>
-        )}
-      </div>
+          ) : (
+            <button
+              type="button"
+              disabled={surveyLoading}
+              onClick={handleEnableAndShare}
+              className="mt-4 flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-primary text-primary-foreground font-heading text-xs uppercase tracking-wider shadow-[3px_3px_0_0_var(--foreground)] active:scale-95 transition-all disabled:opacity-50"
+            >
+              <Share2 className="size-4" />
+              <span>{surveyLoading ? "Aktywowanie ankiety..." : "Udostępnij ankietę zawodnikom"}</span>
+            </button>
+          )}
+        </div>
+      )}
 
       <ul className="mt-4 divide-y divide-border rounded-lg border-2 border-foreground/20 bg-card">
         {players.map((p, playerIndex) => {

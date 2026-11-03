@@ -34,7 +34,25 @@ export interface SurveyStatusItem {
   isCompleted: boolean;
   fatigue: number | null;
   satisfaction: number | null;
+  feedbackNote?: string | null;
   surveyUrl: string;
+}
+
+export interface SurveySummary {
+  isExpired: boolean;
+  expiresAt: string | null;
+  totalSurveys: number;
+  completedSurveys: number;
+  responseRate: number;
+  avgFatigue: number | null;
+  avgSatisfaction: number | null;
+  notes: Array<{
+    playerName: string;
+    jerseyNumber: number | null;
+    fatigue: number;
+    satisfaction: number;
+    feedbackNote: string;
+  }>;
 }
 
 /**
@@ -49,7 +67,6 @@ export async function getCoachTrainingsAction() {
       return { success: false, error: "Brak aktywnej sesji użytkownika.", trainings: [], teams: [] };
     }
 
-    // Pobranie zespołów, do których trener jest przypisany w tabeli team_coaches
     const { data: assignments, error: assignErr } = await supabase
       .from("team_coaches")
       .select(`
@@ -77,7 +94,6 @@ export async function getCoachTrainingsAction() {
 
     const teamIds = assignedTeams.map((t) => t.id);
 
-    // Jeśli trener nie ma jeszcze przypisanych drużyn, zwracamy pusty stan bez wywoływania błędów
     if (teamIds.length === 0) {
       return {
         success: true,
@@ -87,7 +103,6 @@ export async function getCoachTrainingsAction() {
       };
     }
 
-    // Pobranie treningów tylko dla kadr trenera
     const [trainingsRes, squadRes] = await Promise.all([
       supabase
         .from("trainings")
@@ -255,7 +270,7 @@ export async function createTrainingAction(payload: {
 }
 
 /**
- * 3. Pobiera dane pojedynczej jednostki, kadrę oraz status ocen
+ * 3. Pobiera dane pojedynczej jednostki, kadrę oraz status ocen i ankiet RPE
  */
 export async function getTrainingEvaluationDataAction(trainingId: string) {
   try {
@@ -288,7 +303,8 @@ export async function getTrainingEvaluationDataAction(trainingId: string) {
       return { success: false, error: "Nie znaleziono jednostki lub brak do niej uprawnień." };
     }
 
-    const [coachProfileRes, playersRes, evalsRes] = await Promise.all([
+    // Pobieramy sztab, zawodników, oceny oraz ankiety bezpośrednio z bazy
+    const [coachProfileRes, playersRes, evalsRes, surveysRes] = await Promise.all([
       training.lead_coach_id
         ? supabaseAdmin
             .from("profiles")
@@ -304,6 +320,20 @@ export async function getTrainingEvaluationDataAction(trainingId: string) {
       supabase
         .from("evaluations")
         .select("player_id, score, is_present, absence_reason, comment")
+        .eq("training_id", trainingId),
+      supabaseAdmin
+        .from("post_training_surveys")
+        .select(`
+          id,
+          token,
+          is_completed,
+          fatigue,
+          satisfaction,
+          feedback_note,
+          expires_at,
+          player_id,
+          players ( first_name, last_name, jersey_number )
+        `)
         .eq("training_id", trainingId),
     ]);
 
@@ -346,6 +376,51 @@ export async function getTrainingEvaluationDataAction(trainingId: string) {
       }
     });
 
+    // Przeliczenie podsumowania ankiet RPE
+    let surveySummary: SurveySummary | null = null;
+    const surveyRows = surveysRes.data || [];
+    const isSurveyEnabled = Boolean(training.survey_enabled) || surveyRows.length > 0;
+
+    if (surveyRows.length > 0) {
+      const firstExpiresAt = surveyRows[0]?.expires_at || null;
+      const isExpired = firstExpiresAt ? new Date(firstExpiresAt).getTime() <= Date.now() : false;
+      const completedList = surveyRows.filter((s: any) => s.is_completed);
+      const totalCount = surveyRows.length;
+      const completedCount = completedList.length;
+
+      const avgFatigue = completedCount > 0
+        ? Number((completedList.reduce((acc: number, cur: any) => acc + (cur.fatigue || 0), 0) / completedCount).toFixed(1))
+        : null;
+
+      const avgSatisfaction = completedCount > 0
+        ? Number((completedList.reduce((acc: number, cur: any) => acc + (cur.satisfaction || 0), 0) / completedCount).toFixed(1))
+        : null;
+
+      const notes = completedList
+        .filter((s: any) => Boolean(s.feedback_note))
+        .map((s: any) => {
+          const p = Array.isArray(s.players) ? s.players[0] : s.players;
+          return {
+            playerName: p ? `${p.first_name} ${p.last_name}` : "Zawodnik",
+            jerseyNumber: p?.jersey_number ?? null,
+            fatigue: s.fatigue || 0,
+            satisfaction: s.satisfaction || 0,
+            feedbackNote: s.feedback_note,
+          };
+        });
+
+      surveySummary = {
+        isExpired,
+        expiresAt: firstExpiresAt,
+        totalSurveys: totalCount,
+        completedSurveys: completedCount,
+        responseRate: totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0,
+        avgFatigue,
+        avgSatisfaction,
+        notes,
+      };
+    }
+
     return {
       success: true,
       training: {
@@ -357,12 +432,13 @@ export async function getTrainingEvaluationDataAction(trainingId: string) {
         place: training.location || "Boisko główne",
         topic: training.topic || undefined,
         status: training.status,
-        surveyEnabled: Boolean(training.survey_enabled),
+        surveyEnabled: isSurveyEnabled,
         isOwner,
         leadCoachName,
       },
       squad,
       initialMarks,
+      surveySummary,
     };
   } catch (err: any) {
     return { success: false, error: err.message };
@@ -370,7 +446,7 @@ export async function getTrainingEvaluationDataAction(trainingId: string) {
 }
 
 /**
- * 4. Zapisuje pojedynczą ocenę zawodnika w locie
+ * 4. Zapisuje pojedynczą ocenę zawodnika w locie i aktualizuje status jednostki
  */
 export async function savePlayerMarkAction(trainingId: string, playerId: string, mark: Mark) {
   try {
@@ -381,7 +457,7 @@ export async function savePlayerMarkAction(trainingId: string, playerId: string,
 
     const { data: tr } = await supabase
       .from("trainings")
-      .select("club_id, lead_coach_id")
+      .select("club_id, lead_coach_id, status")
       .eq("id", trainingId)
       .single();
 
@@ -416,6 +492,17 @@ export async function savePlayerMarkAction(trainingId: string, playerId: string,
       );
 
     if (error) throw error;
+
+    if (tr.status === "scheduled" || tr.status === "planned") {
+      await supabase
+        .from("trainings")
+        .update({
+          status: "completed",
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", trainingId);
+    }
+
     return { success: true };
   } catch (err: any) {
     return { success: false, error: err.message };
@@ -549,11 +636,12 @@ export async function enableTrainingSurveyAction(trainingId: string) {
 }
 
 /**
- * 7. Pobiera listę ankiet RPE
+ * 7. Pobiera listę ankiet RPE i status wygaśnięcia
  */
 export async function getTrainingSurveysStatusAction(trainingId: string): Promise<{
   success: boolean;
   surveys: SurveyStatusItem[];
+  summary?: SurveySummary;
   shareText?: string;
   error?: string;
 }> {
@@ -578,6 +666,7 @@ export async function getTrainingSurveysStatusAction(trainingId: string): Promis
         fatigue,
         satisfaction,
         feedback_note,
+        expires_at,
         player_id,
         players!inner ( id, first_name, last_name, jersey_number )
       `)
@@ -587,7 +676,17 @@ export async function getTrainingSurveysStatusAction(trainingId: string): Promis
 
     const baseUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
 
+    let expiresAt: string | null = null;
+    let isExpired = false;
+
     const surveys: SurveyStatusItem[] = (data || []).map((s: any) => {
+      if (!expiresAt && s.expires_at) {
+        expiresAt = s.expires_at;
+        if (new Date(s.expires_at) < new Date()) {
+          isExpired = true;
+        }
+      }
+
       const p = Array.isArray(s.players) ? s.players[0] : s.players;
       return {
         id: s.id,
@@ -597,21 +696,51 @@ export async function getTrainingSurveysStatusAction(trainingId: string): Promis
         isCompleted: Boolean(s.is_completed),
         fatigue: s.fatigue,
         satisfaction: s.satisfaction,
-        surveyUrl: `${baseUrl}/ankieta/${s.token}`,
+        feedbackNote: s.feedback_note || null,
+        surveyUrl: `${baseUrl}/ankieta/${trainingId}`,
       };
     });
+
+    const completedList = surveys.filter((s) => s.isCompleted);
+    const totalCount = surveys.length;
+    const completedCount = completedList.length;
+
+    const avgFatigue = completedCount > 0
+      ? Number((completedList.reduce((acc, cur) => acc + (cur.fatigue || 0), 0) / completedCount).toFixed(1))
+      : null;
+
+    const avgSatisfaction = completedCount > 0
+      ? Number((completedList.reduce((acc, cur) => acc + (cur.satisfaction || 0), 0) / completedCount).toFixed(1))
+      : null;
+
+    const notes = completedList
+      .filter((s) => Boolean(s.feedbackNote))
+      .map((s) => ({
+        playerName: s.playerName,
+        jerseyNumber: s.jerseyNumber,
+        fatigue: s.fatigue || 0,
+        satisfaction: s.satisfaction || 0,
+        feedbackNote: s.feedbackNote!,
+      }));
+
+    const summary: SurveySummary = {
+      isExpired,
+      expiresAt,
+      totalSurveys: totalCount,
+      completedSurveys: completedCount,
+      responseRate: totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0,
+      avgFatigue,
+      avgSatisfaction,
+      notes,
+    };
 
     const trainingHeader = training?.date 
       ? ` (${training.date}${training.topic ? ` - ${training.topic}` : ""})` 
       : "";
 
-    const linksList = surveys
-      .map((s, idx) => `${idx + 1}. ${s.playerName}: ${s.surveyUrl}`)
-      .join("\n");
+    const shareText = `FORMA — Ankieta potreningowa${trainingHeader}\nLink do wypełnienia oceny samopoczucia:\n${baseUrl}/ankieta/${trainingId}\n\nLink ważny 24h.`;
 
-    const shareText = `FORMA — Ankieta potreningowa${trainingHeader}\nProśba o wypełnienie krótkiej oceny samopoczucia (30 sekund):\n\n${linksList}\n\nLink wygasa za 24h.`;
-
-    return { success: true, surveys, shareText };
+    return { success: true, surveys, summary, shareText };
   } catch (err: any) {
     return { success: false, error: err.message, surveys: [] };
   }
