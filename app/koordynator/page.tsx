@@ -17,6 +17,15 @@ function formatRate(value: number | null) {
   return value == null ? 'Brak danych' : `${value}%`
 }
 
+function formatAbsenceShare(
+  count: number,
+  reasons: { injury: number; sick: number; excused: number; unexcused: number }
+) {
+  const total = reasons.injury + reasons.sick + reasons.excused + reasons.unexcused
+  const share = total > 0 ? ` (${Math.round((count / total) * 100)}%)` : ''
+  return `${count}${share}`
+}
+
 export default async function CoordinatorPage() {
   await connection()
   const result = await getCoordinatorDashboardAction()
@@ -41,11 +50,25 @@ export default async function CoordinatorPage() {
           <p className="text-xs font-bold uppercase tracking-[0.16em] text-primary">Panel koordynatora · ostatnie 30 dni</p>
           <h1 className="mt-1 font-heading text-4xl uppercase tracking-tight sm:text-5xl">{result.clubName}</h1>
           <p className="mt-2 text-sm text-muted-foreground">
-            Dane od {formatDate(result.periodStart)}. Oceny `- / 0 / +` opisują zmianę względem własnego poziomu zawodnika, nie ranking.
+            Zakres: cały klub · dane od {formatDate(result.periodStart)}. Oceny `- / 0 / +` opisują zmianę względem własnego poziomu zawodnika, nie ranking.
           </p>
         </div>
         {canManageTeams && <CoordinatorTeamForm />}
       </header>
+
+      {teams.length > 0 && (
+        <nav aria-label="Przejdź do raportu zespołu" className="flex flex-wrap gap-2">
+          {teams.map((team) => (
+            <a
+              key={team.id}
+              href={`#team-${team.id}`}
+              className="rounded-full border border-foreground/20 px-3 py-1.5 text-sm font-semibold underline-offset-2 hover:bg-muted hover:underline"
+            >
+              {team.name} <span className="text-muted-foreground">{team.ageGroup}</span>
+            </a>
+          ))}
+        </nav>
+      )}
 
       <section aria-label="Podsumowanie klubu" className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <MetricCard label="Aktywne zespoły" value={metrics.activeTeams} />
@@ -73,7 +96,7 @@ export default async function CoordinatorPage() {
           </div>
 
           {teams.map((team) => (
-            <details key={team.id} className="group rounded-2xl border-2 border-foreground/15 bg-card">
+            <details id={`team-${team.id}`} key={team.id} className="group scroll-mt-6 rounded-2xl border-2 border-foreground/15 bg-card">
               <summary className="cursor-pointer list-none p-5 [&::-webkit-details-marker]:hidden">
                 <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                   <div>
@@ -108,8 +131,10 @@ export default async function CoordinatorPage() {
                     </div>
                     <h4 className="mt-4 font-bold">Powody nieobecności</h4>
                     <p className="mt-1 text-sm text-muted-foreground">
-                      Kontuzja {team.metrics.absenceReasons.injury} · choroba {team.metrics.absenceReasons.sick} ·
-                      usprawiedliwione {team.metrics.absenceReasons.excused} · nieusprawiedliwione {team.metrics.absenceReasons.unexcused}
+                      Kontuzja {formatAbsenceShare(team.metrics.absenceReasons.injury, team.metrics.absenceReasons)} ·
+                      choroba {formatAbsenceShare(team.metrics.absenceReasons.sick, team.metrics.absenceReasons)} ·
+                      usprawiedliwione {formatAbsenceShare(team.metrics.absenceReasons.excused, team.metrics.absenceReasons)} ·
+                      nieusprawiedliwione {formatAbsenceShare(team.metrics.absenceReasons.unexcused, team.metrics.absenceReasons)}
                     </p>
                   </div>
                   <div>
@@ -122,6 +147,41 @@ export default async function CoordinatorPage() {
                     <p className="mt-1 text-sm text-muted-foreground">
                       {team.coaches.length > 0 ? team.coaches.join(', ') : 'Nie przypisano trenerów do zespołu.'}
                     </p>
+                  </div>
+                </div>
+
+                <div>
+                  <h4 className="font-bold">Trend ocen na zrealizowanych treningach</h4>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Ostatnie {team.scoreTrend.length} treningów; słupki pokazują udział ocen + / 0 / −. Brak słupka oznacza brak zarejestrowanych ocen.
+                  </p>
+                  {team.scoreTrend.length === 0 ? (
+                    <p className="mt-2 text-sm text-muted-foreground">Brak zrealizowanych treningów w okresie.</p>
+                  ) : (
+                    <ol className="mt-3 space-y-3">
+                      {team.scoreTrend.map((training) => {
+                        const total = training.scores.plus + training.scores.zero + training.scores.minus
+                        return (
+                          <li key={training.id} className="grid gap-2 sm:grid-cols-[120px_1fr_auto] sm:items-center">
+                            <Link
+                              href={`/koordynator/trening/${training.id}`}
+                              className="text-sm font-semibold underline decoration-primary underline-offset-2"
+                            >
+                              {formatDate(training.date)}
+                            </Link>
+                            <ScoreTrendBar scores={training.scores} total={total} />
+                            <span className="text-xs text-muted-foreground">
+                              + {training.scores.plus} · 0 {training.scores.zero} · − {training.scores.minus}
+                            </span>
+                          </li>
+                        )
+                      })}
+                    </ol>
+                  )}
+                  <div className="mt-2 flex gap-3 text-xs text-muted-foreground" aria-hidden="true">
+                    <span><span className="text-emerald-500">■</span> +</span>
+                    <span><span className="text-slate-400">■</span> 0</span>
+                    <span><span className="text-rose-500">■</span> −</span>
                   </div>
                 </div>
 
@@ -225,6 +285,32 @@ function TeamStat({ label, value }: { label: string; value: string | number }) {
     <div className="rounded-lg border border-foreground/10 bg-background/60 p-3">
       <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">{label}</p>
       <p className="mt-1 font-heading text-2xl">{value}</p>
+    </div>
+  )
+}
+
+function ScoreTrendBar({
+  scores,
+  total,
+}: {
+  scores: { plus: number; zero: number; minus: number }
+  total: number
+}) {
+  const percent = (count: number) => total > 0 ? `${(count / total) * 100}%` : '0%'
+
+  return (
+    <div
+      role="img"
+      aria-label={`Rozkład ocen: plus ${scores.plus}, zero ${scores.zero}, minus ${scores.minus}`}
+      className="flex h-3 overflow-hidden rounded-full bg-muted"
+    >
+      {total > 0 && (
+        <>
+          <span className="bg-emerald-500" style={{ width: percent(scores.plus) }} />
+          <span className="bg-slate-400" style={{ width: percent(scores.zero) }} />
+          <span className="bg-rose-500" style={{ width: percent(scores.minus) }} />
+        </>
+      )}
     </div>
   )
 }

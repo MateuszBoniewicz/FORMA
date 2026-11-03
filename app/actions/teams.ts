@@ -206,7 +206,7 @@ export async function getCoordinatorDashboardAction() {
       trainingIds.length > 0
         ? supabase
             .from('evaluations')
-            .select('training_id, player_id, score, is_present, absence_reason')
+            .select('id, training_id, player_id, score, is_present, absence_reason')
             .in('training_id', trainingIds)
             .limit(10000)
         : Promise.resolve({ data: [], error: null }),
@@ -246,10 +246,12 @@ export async function getCoordinatorDashboardAction() {
 
     const summaries = teams.map((team) => {
       const roster = rosterByTeam.get(team.id) || [];
+      const rosterPlayerIds = new Set(roster.map((player) => player.id));
       const teamTrainings = trainings.filter((training) => training.team_id === team.id);
       const teamAssignments = (assignmentsResult.data || []).filter((assignment) => assignment.team_id === team.id);
       const teamSummaries: CoordinatorTrainingSummary[] = teamTrainings.map((training) => {
-        const trainingEvaluations = evaluationsByTraining.get(training.id) || [];
+        const trainingEvaluations = (evaluationsByTraining.get(training.id) || [])
+          .filter((evaluation) => rosterPlayerIds.has(evaluation.player_id));
         const presentCount = trainingEvaluations.filter((evaluation) => evaluation.is_present).length;
         const expectedCount = roster.length;
         const scoreCounts = {
@@ -281,7 +283,10 @@ export async function getCoordinatorDashboardAction() {
 
       const completedTrainings = teamSummaries.filter((training) => training.status === 'completed');
       const completedTrainingIds = new Set(completedTrainings.map((training) => training.id));
-      const completedEvaluations = evaluations.filter((evaluation) => completedTrainingIds.has(evaluation.training_id));
+      const completedEvaluations = completedTrainings.flatMap((training) =>
+        (evaluationsByTraining.get(training.id) || [])
+          .filter((evaluation) => rosterPlayerIds.has(evaluation.player_id))
+      );
       const presentEvaluations = completedEvaluations.filter((evaluation) => evaluation.is_present);
       const teamSurveys = surveys.filter((survey) => completedTrainingIds.has(survey.training_id));
       const completedSurveys = teamSurveys.filter((survey) => survey.is_completed);
@@ -357,6 +362,7 @@ export async function getCoordinatorDashboardAction() {
         metrics: {
           completedTrainings: completedTrainings.length,
           completedTrainingEvaluations: completedEvaluations.length,
+          presentEvaluationCount: presentEvaluations.length,
           expectedEvaluations,
           completionRate: expectedEvaluations > 0
             ? Math.min(100, Math.round((completedEvaluations.length / expectedEvaluations) * 100))
@@ -374,17 +380,22 @@ export async function getCoordinatorDashboardAction() {
           scoreTotals,
           absenceReasons,
         },
+        scoreTrend: completedTrainings
+          .slice(0, 8)
+          .reverse()
+          .map((training) => ({
+            id: training.id,
+            date: training.date,
+            topic: training.topic,
+            scores: training.scores,
+          })),
         players: teamPlayers,
       };
     });
 
     const totalExpected = summaries.reduce((total, team) => total + team.metrics.expectedEvaluations, 0);
-    const completedTrainingIds = new Set(
-      trainings.filter((training) => training.status === 'completed').map((training) => training.id)
-    );
-    const completedEvaluations = evaluations.filter((evaluation) => completedTrainingIds.has(evaluation.training_id));
-    const totalEvaluated = completedEvaluations.length;
-    const totalPresent = completedEvaluations.filter((evaluation) => evaluation.is_present).length;
+    const totalEvaluated = summaries.reduce((total, team) => total + team.metrics.completedTrainingEvaluations, 0);
+    const totalPresent = summaries.reduce((total, team) => total + team.metrics.presentEvaluationCount, 0);
 
     return {
       success: true as const,
@@ -548,7 +559,7 @@ export async function getCoordinatorTrainingAction(trainingId: string) {
         .order('jersey_number', { ascending: true, nullsFirst: false }),
       supabase
         .from('evaluations')
-        .select('player_id, score, is_present, absence_reason, comment, players!inner(id, first_name, last_name, jersey_number)')
+        .select('id, player_id, score, is_present, absence_reason, comment, players!inner(id, first_name, last_name, jersey_number)')
         .eq('training_id', trainingId)
         .eq('club_id', profile.club_id),
       supabase
@@ -594,6 +605,7 @@ export async function getCoordinatorTrainingAction(trainingId: string) {
         const survey = surveyByPlayer.get(player.id);
         return {
           playerId: player.id,
+          evaluationId: evaluation?.id ?? null,
           playerName: `${player.first_name} ${player.last_name}`,
           jerseyNumber: player.jersey_number,
           isEvaluated: Boolean(evaluation),
@@ -611,6 +623,78 @@ export async function getCoordinatorTrainingAction(trainingId: string) {
     return {
       success: false as const,
       error: error instanceof Error ? error.message : 'Nie udało się pobrać szczegółów treningu.',
+    };
+  }
+}
+
+export async function getCoordinatorEvaluationAction(evaluationId: string) {
+  try {
+    if (!evaluationId) return { success: false as const, error: 'Nie podano oceny.' };
+
+    const supabase = await createClient();
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    if (authError || !user) return { success: false as const, error: 'Zaloguj się, aby zobaczyć ocenę.' };
+
+    const { data: profile, error: profileError } = await supabase
+      .from('profiles')
+      .select('club_id, role')
+      .eq('id', user.id)
+      .maybeSingle();
+    if (profileError) throw profileError;
+    if (!profile?.club_id || !['coordinator', 'club_admin', 'master_admin'].includes(profile.role)) {
+      return { success: false as const, error: 'Brak uprawnień do oceny.' };
+    }
+
+    const { data: evaluation, error: evaluationError } = await supabase
+      .from('evaluations')
+      .select(`
+        id,
+        training_id,
+        player_id,
+        score,
+        is_present,
+        absence_reason,
+        comment,
+        trainings!inner(id, date, topic, status, club_id, teams(name, age_group)),
+        players!inner(first_name, last_name, jersey_number)
+      `)
+      .eq('id', evaluationId)
+      .eq('club_id', profile.club_id)
+      .eq('trainings.club_id', profile.club_id)
+      .maybeSingle();
+    if (evaluationError) throw evaluationError;
+    if (!evaluation) return { success: false as const, error: 'Nie znaleziono oceny w Twoim klubie.' };
+
+    const training = Array.isArray(evaluation.trainings) ? evaluation.trainings[0] : evaluation.trainings;
+    const team = Array.isArray(training?.teams) ? training.teams[0] : training?.teams;
+    const player = Array.isArray(evaluation.players) ? evaluation.players[0] : evaluation.players;
+    if (!training || !player) {
+      return { success: false as const, error: 'Brakuje powiązanego treningu lub zawodnika dla tej oceny.' };
+    }
+
+    return {
+      success: true as const,
+      evaluation: {
+        id: evaluation.id,
+        trainingId: evaluation.training_id,
+        playerId: evaluation.player_id,
+        playerName: `${player.first_name} ${player.last_name}`,
+        jerseyNumber: player.jersey_number,
+        date: training.date,
+        topic: training.topic,
+        trainingStatus: training.status,
+        teamName: team?.name || 'Drużyna',
+        ageGroup: team?.age_group || '',
+        isPresent: evaluation.is_present,
+        score: evaluation.score,
+        absenceReason: evaluation.absence_reason,
+        comment: evaluation.comment,
+      },
+    };
+  } catch (error) {
+    return {
+      success: false as const,
+      error: error instanceof Error ? error.message : 'Nie udało się pobrać oceny.',
     };
   }
 }

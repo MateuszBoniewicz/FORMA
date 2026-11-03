@@ -91,6 +91,14 @@ export default async function CoordinatorTrainingPage({
                         : item.isPresent
                           ? `Obecny · ${item.score || 'bez oceny'}`
                           : `Nieobecny · ${absenceLabel(item.absenceReason)}`}
+                      {item.evaluationId && (
+                        <Link
+                          href={`/koordynator/ocena/${item.evaluationId}`}
+                          className="mt-1 block text-xs font-semibold underline decoration-primary underline-offset-2"
+                        >
+                          Szczegóły oceny
+                        </Link>
+                      )}
                     </td>
                     <td className="py-3 pr-3">{item.comment || '—'}</td>
                     <td className="py-3">
