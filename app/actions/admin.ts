@@ -528,6 +528,18 @@ export async function assignCoachToTeamAction(payload: {
       return { success: false, error: "Do drużyny można przypisać wyłącznie trenera z tego klubu." };
     }
 
+    const { data: team, error: teamError } = await supabase
+      .from("teams")
+      .select("id")
+      .eq("id", payload.teamId)
+      .eq("club_id", clubId)
+      .eq("is_active", true)
+      .maybeSingle();
+    if (teamError) throw teamError;
+    if (!team) {
+      return { success: false, error: "Wybrana drużyna nie należy do tego klubu." };
+    }
+
     const { data: existing } = await supabase
       .from("team_coaches")
       .select("id")
@@ -558,8 +570,29 @@ export async function assignCoachToTeamAction(payload: {
 
 export async function removeCoachFromTeamAction(teamId: string, coachId: string) {
   try {
-    await requireAdmin();
+    const { clubId } = await requireAdmin();
     const supabase = await createClient();
+
+    const [{ data: team, error: teamError }, { data: coach, error: coachError }] =
+      await Promise.all([
+        supabase
+          .from("teams")
+          .select("id")
+          .eq("id", teamId)
+          .eq("club_id", clubId)
+          .maybeSingle(),
+        supabase
+          .from("profiles")
+          .select("id")
+          .eq("id", coachId)
+          .eq("club_id", clubId)
+          .maybeSingle(),
+      ]);
+    if (teamError) throw teamError;
+    if (coachError) throw coachError;
+    if (!team || !coach) {
+      return { success: false, error: "Trener lub drużyna nie należy do tego klubu." };
+    }
 
     const { error } = await supabase
       .from("team_coaches")
@@ -630,6 +663,19 @@ export async function createPlayerAction(payload: {
 }) {
   try {
     const { clubId } = await requireAdmin();
+
+    if (payload.currentTeamId) {
+      const { data: team, error: teamError } = await supabaseAdmin
+        .from("teams")
+        .select("id")
+        .eq("id", payload.currentTeamId)
+        .eq("club_id", clubId)
+        .eq("is_active", true)
+        .maybeSingle();
+      if (teamError) throw teamError;
+      if (!team) return { success: false, error: "Wybrana drużyna nie należy do tego klubu." };
+    }
+
     const currentYear = new Date().getFullYear();
     const isJunior = (currentYear - payload.birthYear) < 18;
 
@@ -699,6 +745,24 @@ export async function transferPlayerToTeamAction(playerId: string, teamId: strin
       return { success: false, error: "Wybierz zawodnika i drużynę docelową." };
     }
 
+    const [{ data: player }, { data: team }] = await Promise.all([
+      supabaseAdmin
+        .from("players")
+        .select("id")
+        .eq("id", playerId)
+        .eq("club_id", clubId)
+        .maybeSingle(),
+      supabaseAdmin
+        .from("teams")
+        .select("id")
+        .eq("id", teamId)
+        .eq("club_id", clubId)
+        .eq("is_active", true)
+        .maybeSingle(),
+    ]);
+    if (!player) return { success: false, error: "Zawodnik nie należy do tego klubu." };
+    if (!team) return { success: false, error: "Drużyna nie należy do tego klubu." };
+
     const { error } = await supabaseAdmin.rpc("transfer_player_to_team", {
       p_club_id: clubId,
       p_player_id: playerId,
@@ -738,6 +802,18 @@ export async function bulkImportPlayersAction(
 
     if (!records || records.length === 0) {
       return { success: false, error: "Brak danych do zaimportowania." };
+    }
+
+    if (teamId) {
+      const { data: team, error: teamError } = await supabaseAdmin
+        .from("teams")
+        .select("id")
+        .eq("id", teamId)
+        .eq("club_id", clubId)
+        .eq("is_active", true)
+        .maybeSingle();
+      if (teamError) throw teamError;
+      if (!team) return { success: false, error: "Wybrana drużyna nie należy do tego klubu." };
     }
 
     const currentYear = new Date().getFullYear();

@@ -1109,7 +1109,7 @@ export async function savePlayerMarkAction(
           .maybeSingle(),
         supabaseAdmin
           .from("evaluations")
-          .select("player_id")
+          .select("player_id, club_id")
           .eq("training_id", trainingId)
           .eq("club_id", tr.club_id)
           .eq("player_id", playerId)
@@ -1310,6 +1310,7 @@ export async function enableTrainingSurveyAction(trainingId: string) {
       .from("evaluations")
       .select("player_id")
       .eq("training_id", trainingId)
+      .eq("club_id", training.club_id)
       .eq("is_present", true);
 
     if (evErr) throw evErr;
@@ -1317,7 +1318,8 @@ export async function enableTrainingSurveyAction(trainingId: string) {
     const { data: existingSurveys, error: existingError } = await supabaseAdmin
       .from("post_training_surveys")
       .select("player_id")
-      .eq("training_id", trainingId);
+      .eq("training_id", trainingId)
+      .eq("club_id", training.club_id);
     if (existingError) throw existingError;
 
     const existingPlayerIds = new Set((existingSurveys || []).map((survey) => survey.player_id));
@@ -1750,12 +1752,15 @@ export async function addGuestPlayerToTrainingAction(
     }
 
     // Blokada dodania, jeśli to stały zawodnik tej samej drużyny
-    const { data: playerInfo } = await supabase
+    const { data: playerInfo } = await supabaseAdmin
       .from("players")
-      .select("current_team_id")
+      .select("current_team_id, club_id")
       .eq("id", playerId)
       .single();
 
+    if (!playerInfo || playerInfo.club_id !== training.club_id) {
+      return { success: false, error: "Zawodnik nie należy do klubu tej jednostki." };
+    }
     if (playerInfo?.current_team_id === training.team_id) {
       return { success: false, error: "Ten zawodnik jest już w składzie tej drużyny" };
     }
