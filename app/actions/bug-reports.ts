@@ -32,7 +32,7 @@ export async function submitBugReportAction(formData: FormData) {
     const browserInfo = String(formData.get("browserInfo") || "").slice(0, 500);
     const file = formData.get("screenshot");
 
-    if (title.length < 3 || description.length < 10) {
+    if (title.length < 3 || title.length > 200 || description.length < 10 || description.length > 5000) {
       return { success: false, error: "Podaj tytuł i dokładniejszy opis problemu." };
     }
     if (!["bug", "suggestion", "login"].includes(category) || !["low", "normal", "high"].includes(priority)) {

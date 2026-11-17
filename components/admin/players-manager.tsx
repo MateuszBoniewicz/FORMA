@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef } from "react";
+import Image from "next/image";
 import { 
   UserPlus, 
   FileSpreadsheet, 
@@ -482,10 +483,11 @@ export function PlayersManager({
                             title="Kliknij, aby wgrać lub zmienić zdjęcie"
                           >
                             {player.avatar_url ? (
-                              // eslint-disable-next-line @next/next/no-img-element
-                              <img
+                              <Image
                                 src={player.avatar_url}
                                 alt={`${player.first_name} ${player.last_name}`}
+                                fill
+                                sizes="40px"
                                 className="size-full object-cover group-hover/avatar:opacity-60 transition-opacity"
                               />
                             ) : (
@@ -720,10 +722,11 @@ export function PlayersManager({
                 title="Kliknij, aby wybrać plik"
               >
                 {avatarModalPlayer.avatar_url ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
+                  <Image
                     src={avatarModalPlayer.avatar_url}
                     alt="Awatar"
+                    fill
+                    sizes="112px"
                     className="size-full object-cover group-hover:opacity-75 transition-opacity"
                   />
                 ) : (
@@ -822,8 +825,7 @@ export function PlayersManager({
                   className="relative size-16 rounded-full border-2 border-dashed border-foreground/30 bg-muted/40 flex items-center justify-center overflow-hidden cursor-pointer hover:border-foreground shrink-0 transition"
                 >
                   {avatarUrl ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={avatarUrl} alt="Awatar" className="size-full object-cover" />
+                    <Image src={avatarUrl} alt="Awatar" fill sizes="64px" className="size-full object-cover" />
                   ) : (
                     <User className="size-7 text-muted-foreground" />
                   )}

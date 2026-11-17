@@ -50,31 +50,30 @@ export async function getAdminDashboardAction() {
     const { clubId } = await requireAdmin();
     const supabase = await createClient();
 
-    const [clubRes, seasonRes, teamsRes, playersRes, coachesRes] = await Promise.all([
+    const [clubRes, seasonRes, teamsRes, activeTeamsRes, playersRes, activePlayersRes, coachesRes] = await Promise.all([
       supabase.from("clubs").select("name, logo_url").eq("id", clubId).single(),
       supabase.from("seasons").select("id, name").eq("club_id", clubId).eq("is_current", true).maybeSingle(),
-      supabase.from("teams").select("id, name, is_active").eq("club_id", clubId),
-      supabase.from("players").select("id, is_active").eq("club_id", clubId),
+      supabase.from("teams").select("id", { count: "exact", head: true }).eq("club_id", clubId),
+      supabase.from("teams").select("id", { count: "exact", head: true }).eq("club_id", clubId).eq("is_active", true),
+      supabase.from("players").select("id", { count: "exact", head: true }).eq("club_id", clubId),
+      supabase.from("players").select("id", { count: "exact", head: true }).eq("club_id", clubId).eq("is_active", true),
       supabase
         .from("profiles")
-        .select("id")
+        .select("id", { count: "exact", head: true })
         .eq("club_id", clubId)
         .in("role", ["coach", "coordinator"]),
     ]);
-
-    const teams = teamsRes.data || [];
-    const players = playersRes.data || [];
 
     return {
       success: true,
       club: clubRes.data,
       currentSeason: seasonRes.data?.name || "Brak aktywnego sezonu",
       metrics: {
-        totalTeams: teams.length,
-        activeTeams: teams.filter((t) => t.is_active).length,
-        totalPlayers: players.length,
-        activePlayers: players.filter((p) => p.is_active).length,
-        totalCoaches: (coachesRes.data || []).length,
+        totalTeams: teamsRes.count || 0,
+        activeTeams: activeTeamsRes.count || 0,
+        totalPlayers: playersRes.count || 0,
+        activePlayers: activePlayersRes.count || 0,
+        totalCoaches: coachesRes.count || 0,
       },
     };
   } catch (err: unknown) {
@@ -399,88 +398,6 @@ export async function deleteCoachAction(coachId: string) {
 }
 
 /**
- * Pomocnik rejestrujący zdarzenie audytowe w bazie
- */
-export async function logAuditEvent(payload: {
-  clubId: string;
-  userId?: string;
-  action: string;
-  entityType: string;
-  entityId?: string;
-  oldData?: unknown;
-  newData?: unknown;
-}) {
-  try {
-    const { error } = await supabaseAdmin.from("audit_logs").insert({
-      club_id: payload.clubId,
-      user_id: payload.userId || null,
-      action: payload.action,
-      table_name: payload.entityType,
-      record_id: payload.entityId || null,
-      old_data: payload.oldData || null,
-      new_data: payload.newData || null,
-      created_at: new Date().toISOString(),
-    });
-    if (error) throw error;
-  } catch (err) {
-    console.error("Błąd zapisu do audit_logs:", err);
-  }
-}
-
-/**
- * Pobieranie ostatnich wpisów audytowych dla klubu
- */
-export async function getClubAuditLogsAction(limit = 100) {
-  try {
-    const { clubId } = await requireAdmin();
-    const supabase = await createClient();
-
-    const { data: logs, error } = await supabase
-      .from("audit_logs")
-      .select(`
-        id,
-        action,
-        table_name,
-        record_id,
-        old_data,
-        new_data,
-        created_at,
-        profiles:user_id ( full_name, email )
-      `)
-      .eq("club_id", clubId)
-      .order("created_at", { ascending: false })
-      .limit(limit);
-
-    if (error) throw error;
-
-    const formattedLogs = (logs || []).map((l: {
-      id: string;
-      action: string;
-      table_name: string;
-      record_id: string | null;
-      old_data: unknown;
-      new_data: unknown;
-      created_at: string;
-      profiles: { full_name: string | null; email: string | null }[];
-    }) => ({
-      id: l.id,
-      action: l.action,
-      entityType: l.table_name,
-      entityId: l.record_id,
-      oldData: l.old_data,
-      newData: l.new_data,
-      createdAt: l.created_at,
-      authorName: l.profiles[0]?.full_name || "System",
-      authorEmail: l.profiles[0]?.email || null,
-    }));
-
-    return { success: true, logs: formattedLogs };
-  } catch (err: unknown) {
-    return { success: false, error: getErrorMessage(err, "Nie udalo sie wykonac operacji."), logs: [] };
-  }
-}
-
-/**
  * Jednolita aktualizacja adresu logo / herbu klubu w bazie (z obsługą usuwania null)
  */
 export async function updateClubLogoAction(logoUrl: string | null) {
@@ -770,60 +687,6 @@ export async function createPlayerAction(payload: {
     revalidatePath("/admin/zawodnicy");
     revalidatePath("/admin");
     return { success: true, playerId: player.id };
-  } catch (err: unknown) {
-    return { success: false, error: getErrorMessage(err, "Nie udalo sie wykonac operacji.") };
-  }
-}
-
-export async function updatePlayerAction(payload: {
-  playerId: string;
-  firstName: string;
-  lastName: string;
-  jerseyNumber: number | null;
-  birthYear: number;
-  birthDate?: string;
-  avatarUrl?: string;
-  currentTeamId: string | null;
-  phone?: string;
-  email?: string;
-  parentName?: string;
-  parentPhone?: string;
-  parentEmail?: string;
-  isActive?: boolean;
-}) {
-  try {
-    const { clubId } = await requireAdmin();
-    const currentYear = new Date().getFullYear();
-    const isJunior = (currentYear - payload.birthYear) < 18;
-
-    const { error } = await supabaseAdmin
-      .from("players")
-      .update({
-        current_team_id: payload.currentTeamId || null,
-        first_name: payload.firstName.trim(),
-        last_name: payload.lastName.trim(),
-        jersey_number: payload.jerseyNumber,
-        birth_year: payload.birthYear,
-        birth_date: payload.birthDate || null,
-        avatar_url: payload.avatarUrl?.trim() || null,
-        phone: payload.phone?.trim() || null,
-        email: payload.email?.trim().toLowerCase() || null,
-        parent_name: payload.parentName?.trim() || null,
-        parent_phone: payload.parentPhone?.trim() || null,
-        parent_email: payload.parentEmail?.trim().toLowerCase() || null,
-        preferred_survey_recipient: isJunior ? "parent" : "player",
-        is_active: payload.isActive !== undefined ? payload.isActive : true,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", payload.playerId)
-      .eq("club_id", clubId);
-
-    if (error) throw error;
-
-    revalidatePath("/admin/zawodnicy");
-    revalidatePath("/admin/druzyny");
-    revalidatePath("/admin");
-    return { success: true };
   } catch (err: unknown) {
     return { success: false, error: getErrorMessage(err, "Nie udalo sie wykonac operacji.") };
   }
