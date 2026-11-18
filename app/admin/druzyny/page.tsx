@@ -28,7 +28,7 @@ export default async function AdminTeamsPage() {
       }))
     : [];
   const coaches = coachesRes.success && coachesRes.coaches
-    ? coachesRes.coaches.filter((coach) => coach.role === "coach")
+    ? coachesRes.coaches
     : [];
 
   return (

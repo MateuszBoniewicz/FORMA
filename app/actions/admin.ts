@@ -525,7 +525,7 @@ export async function assignCoachToTeamAction(payload: {
 
     if (coachError) throw coachError;
     if (!coach) {
-      return { success: false, error: "Do drużyny można przypisać wyłącznie trenera z tego klubu." };
+      return { success: false, error: "Można przypisać wyłącznie trenera lub koordynatora z tego klubu." };
     }
 
     const { data: team, error: teamError } = await supabase

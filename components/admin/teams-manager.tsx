@@ -19,6 +19,7 @@ import { cn } from "@/lib/utils";
 
 export interface AvailableCoach {
   id: string;
+  role?: "coach" | "coordinator";
   fullName?: string;
   full_name?: string;
   email: string;
@@ -81,6 +82,7 @@ export function TeamsManager({
   const [selectedCoachId, setSelectedCoachId] = useState(availableCoaches[0]?.id || "");
   const [isPrimaryCoach, setIsPrimaryCoach] = useState(false);
   const [submittingAssign, setSubmittingAssign] = useState(false);
+  const selectedStaffMember = availableCoaches.find((member) => member.id === selectedCoachId);
 
   async function handleCreateTeam(e: React.FormEvent) {
     e.preventDefault();
@@ -120,7 +122,7 @@ export function TeamsManager({
     const res = await assignCoachToTeamAction({
       teamId: selectedTeam.id,
       coachId: selectedCoachId,
-      isPrimary: isPrimaryCoach,
+      isPrimary: isPrimaryCoach && selectedStaffMember?.role !== "coordinator",
     });
 
     if (res.success) {
@@ -272,7 +274,7 @@ export function TeamsManager({
                   className="inline-flex h-10 items-center gap-1.5 rounded-xl border-2 border-foreground/20 bg-background px-3.5 text-xs font-heading uppercase tracking-wider font-bold hover:bg-muted transition-all active:scale-95 shadow-[2px_2px_0_0_var(--foreground)] shrink-0"
                 >
                   <UserPlus className="size-3.5 text-primary" />
-                  <span>Przypisz trenera</span>
+                  <span>Przypisz osobę</span>
                 </button>
               </div>
 
@@ -283,7 +285,7 @@ export function TeamsManager({
 
                 {selectedTeam.team_coaches.length === 0 ? (
                   <div className="rounded-xl border-2 border-dashed border-foreground/20 p-6 text-center text-xs text-muted-foreground font-mono">
-                    Do tej drużyny nie przypisano jeszcze żadnego trenera z kadr klubu.
+                    Do tej drużyny nie przypisano jeszcze trenera ani koordynatora z kadr klubu.
                   </div>
                 ) : (
                   <div className="space-y-2.5">
@@ -321,7 +323,7 @@ export function TeamsManager({
                           type="button"
                           onClick={() => handleRemoveCoach(assignment.coach_id)}
                           className="rounded-lg border border-destructive/30 p-2 text-destructive hover:bg-destructive/10 transition-colors"
-                          title="Odepnij trenera"
+                          title="Odepnij osobę od zespołu"
                         >
                           <Trash2 className="size-4" />
                         </button>
@@ -339,7 +341,7 @@ export function TeamsManager({
         </div>
       </div>
 
-      {/* Modal: Przypisywanie trenera */}
+      {/* Modal: przypisanie członka kadry do zespołu */}
       {isAssignModalOpen && selectedTeam && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm animate-in fade-in duration-150">
           <div className="w-full max-w-md rounded-2xl border-2 border-foreground bg-card p-6 shadow-[5px_5px_0_0_var(--foreground)] space-y-4">
@@ -349,7 +351,7 @@ export function TeamsManager({
                   {selectedTeam.name}
                 </span>
                 <h3 className="font-heading text-2xl uppercase tracking-tight">
-                  Przypisz trenera
+                  Przypisz osobę do zespołu
                 </h3>
               </div>
               <button type="button" onClick={() => setIsAssignModalOpen(false)} className="rounded-full border p-1 hover:bg-muted">
@@ -360,18 +362,21 @@ export function TeamsManager({
             <form onSubmit={handleAssignCoach} className="space-y-4">
               <div>
                 <label className="font-mono text-xs font-bold uppercase text-muted-foreground block mb-1.5">
-                  Wybierz trenera z kadr klubu
+                  Wybierz osobę z kadr klubu
                 </label>
                 <select
                   value={selectedCoachId}
-                  onChange={(e) => setSelectedCoachId(e.target.value)}
+                  onChange={(e) => {
+                    setSelectedCoachId(e.target.value);
+                    setIsPrimaryCoach(false);
+                  }}
                   className="h-11 w-full rounded-xl border-2 border-foreground/20 bg-background px-3 font-mono text-sm outline-none focus:border-foreground"
                 >
                   {availableCoaches.map((c) => {
                     const displayName = c.full_name || c.fullName || "Trener";
                     return (
                       <option key={c.id} value={c.id}>
-                        {displayName} ({c.email})
+                        {displayName} · {c.role === "coordinator" ? "Koordynator" : "Trener"} ({c.email})
                       </option>
                     );
                   })}
@@ -382,11 +387,12 @@ export function TeamsManager({
                 <input
                   type="checkbox"
                   checked={isPrimaryCoach}
+                  disabled={selectedStaffMember?.role === "coordinator"}
                   onChange={(e) => setIsPrimaryCoach(e.target.checked)}
                   className="size-4 accent-primary rounded cursor-pointer"
                 />
                 <span className="font-mono text-xs font-bold uppercase">
-                  Ustaw jako I Trenera
+                  Ustaw jako I trenera
                 </span>
               </label>
 
